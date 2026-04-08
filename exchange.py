@@ -1,4 +1,6 @@
 import time
+import json
+import os
 import ccxt
 import pandas as pd
 from config import Config
@@ -12,10 +14,28 @@ class Exchange:
             "enableRateLimit": True,
         })
 
-        # Paper trading state
+        # Paper trading state — restore from log if available
         self.paper_balance = Config.INITIAL_CAPITAL
         self.paper_positions = {}
         self._markets_loaded = False
+        self._restore_paper_balance()
+
+    def _restore_paper_balance(self):
+        """Restore paper balance from trades.json on restart (for persistent deployments)."""
+        if not Config.is_paper_mode():
+            return
+        json_path = os.path.join("logs", "trades.json")
+        if not os.path.exists(json_path):
+            return
+        try:
+            with open(json_path) as f:
+                entries = json.load(f)
+            trades = [e for e in entries if not e.get("session_start") and "balance_after" in e]
+            if trades:
+                self.paper_balance = trades[-1]["balance_after"]
+                print(f"  [Restore] Paper balance restored: {self.paper_balance:.2f} EUR")
+        except Exception as e:
+            print(f"  [Restore] Could not restore balance: {e}")
 
     def _ensure_markets(self):
         if not self._markets_loaded:

@@ -22,6 +22,46 @@ from notifier import Notifier
 
 
 
+def _restore_positions(risk_mgr, exchange):
+    """Reconstruct open positions from trade log after restart."""
+    import json, os
+    json_path = os.path.join("logs", "trades.json")
+    if not os.path.exists(json_path):
+        return
+    try:
+        with open(json_path) as f:
+            entries = json.load(f)
+        # Only last session
+        si = max((i for i,e in enumerate(entries) if e.get("session_start")), default=-1)
+        trades = [e for e in entries[si+1:] if not e.get("session_start")]
+        if not trades:
+            return
+        positions = {}
+        for t in trades:
+            sym, side, vol, price, cost = t["pair"], t["side"], t["volume"], t["price_eur"], t["total_eur"]
+            if side in ("buy", "short"):
+                if sym not in positions:
+                    positions[sym] = {"volume": 0, "cost": 0, "entry": price,
+                                      "direction": "short" if side == "short" else "long",
+                                      "strategy": t.get("strategy", "momentum")}
+                positions[sym]["volume"] += vol
+                positions[sym]["cost"] += cost
+            elif side == "sell" and sym in positions:
+                positions[sym]["volume"] -= vol
+                if positions[sym]["volume"] <= 0.0001:
+                    del positions[sym]
+        for sym, pos in positions.items():
+            if pos["volume"] > 0.0001:
+                risk_mgr.open_position(sym, pos["entry"], pos["volume"],
+                                       pos["strategy"], pos["direction"])
+                if pos["direction"] == "long":
+                    exchange.paper_positions[sym] = pos["volume"]
+        if positions:
+            print(f"  [Restore] {len(positions)} Positionen wiederhergestellt")
+    except Exception as e:
+        print(f"  [Restore] Fehler: {e}")
+
+
 def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analysis, balance):
     """Execute a trade and log it."""
     strategy = analysis.get("strategy", "unknown")
@@ -121,6 +161,9 @@ def run_bot():
     risk_mgr = RiskManager()
     logger = TradeLogger()
     notifier = Notifier()
+
+    # Restore open positions from trade log (survives Railway restarts)
+    _restore_positions(risk_mgr, exchange)
 
     logger.log_session_start(Config.INITIAL_CAPITAL)
 
