@@ -20,3 +20,4 @@ urllib3==2.6.3
 websockets==16.0
 ccxt>=4.5.0
 python-dotenv==1.0.0
+ta==0.11.0
