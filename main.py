@@ -97,8 +97,11 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
                              mode=Config.TRADING_MODE, strategy=strategy,
                              signal_reason=analysis["reason"],
                              balance_after=exchange.get_balance())
+            portfolio_val = risk_manager.get_portfolio_value(exchange)
+            daily_pnl = risk_manager.get_daily_pnl_pct(exchange)
             notifier.notify_trade(log_side, symbol, volume, exec_price,
-                                  analysis["reason"], strategy, exchange.get_balance())
+                                  analysis["reason"], strategy, exchange.get_balance(),
+                                  portfolio_val, daily_pnl)
             return True
         else:
             print(f"    Order failed: {result.get('error', '?')}")
@@ -132,7 +135,9 @@ def check_exits(exchange, risk_manager, logger, notifier):
                                  mode=Config.TRADING_MODE, strategy=pos["strategy"],
                                  signal_reason=exit_type,
                                  balance_after=exchange.get_balance())
-                notifier.notify_exit(symbol, exit_type, pnl, pos["strategy"])
+                port_val = risk_manager.get_portfolio_value(exchange)
+                d_pnl = risk_manager.get_daily_pnl_pct(exchange)
+                notifier.notify_exit(symbol, exit_type, pnl, pos["strategy"], port_val, d_pnl)
                 risk_manager.close_position(symbol)
                 exits.append((symbol, exit_type, pnl))
 

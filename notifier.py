@@ -19,14 +19,22 @@ class Notifier:
             pass
 
     def notify_trade(self, side: str, symbol: str, volume: float, price: float,
-                     reason: str, strategy: str, balance: float):
-        emoji = "BUY" if side == "buy" else "SELL"
-        self.send(f"{'BUY' if side == 'buy' else 'SELL'} *{symbol}*\n"
-                  f"Vol: `{volume:.6f}` @ `{price:.2f}EUR`\n"
+                     reason: str, strategy: str, balance: float, portfolio: float = 0,
+                     daily_pnl: float = 0):
+        action = "🟢 BUY" if side == "buy" else ("🔴 SHORT" if side == "short" else "⚪ SELL")
+        self.send(f"{action} *{symbol}*\n"
+                  f"Vol: `{volume:.6f}` @ `{price:.4f}EUR`\n"
                   f"Strategy: _{strategy}_\n"
-                  f"Reason: _{reason}_\n"
-                  f"Balance: `{balance:.2f}EUR`")
+                  f"Signal: _{reason}_\n"
+                  f"Cash: `{balance:.2f}EUR`\n"
+                  f"Portfolio: `{portfolio:.2f}EUR`\n"
+                  f"Tages-P&L: `{daily_pnl:+.2f}%`")
 
-    def notify_exit(self, symbol: str, exit_type: str, pnl: float, strategy: str):
-        self.send(f"{'TP' if exit_type == 'take_profit' else 'SL'} *{symbol}*\n"
-                  f"P&L: `{pnl:+.2f}EUR` [{strategy}]")
+    def notify_exit(self, symbol: str, exit_type: str, pnl: float, strategy: str,
+                    portfolio: float = 0, daily_pnl: float = 0):
+        icon = "✅" if exit_type == "take_profit" else "🛑"
+        label = "TAKE PROFIT" if exit_type == "take_profit" else "STOP LOSS"
+        self.send(f"{icon} {label} *{symbol}*\n"
+                  f"P&L: `{pnl:+.2f}EUR` _{strategy}_\n"
+                  f"Portfolio: `{portfolio:.2f}EUR`\n"
+                  f"Tages-P&L: `{daily_pnl:+.2f}%`")
