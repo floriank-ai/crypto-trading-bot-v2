@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(source venv/bin/activate)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''main.py''\\).read\\(\\)\\); print\\(''main.py syntax OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''portfolio_status.py''\\).read\\(\\)\\); ast.parse\\(open\\(''main.py''\\).read\\(\\)\\); ast.parse\\(open\\(''trade_logger.py''\\).read\\(\\)\\); print\\(''Alle OK''\\)\")",
+      "Bash(/Users/floriankretschman/Downloads/crypto-trading-bot-v2/venv/bin/python portfolio_status.py 2>&1)"
+    ]
+  }
+}
