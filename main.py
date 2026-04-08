@@ -171,6 +171,7 @@ def run_bot():
     _restore_positions(risk_mgr, exchange)
 
     logger.log_session_start(Config.INITIAL_CAPITAL)
+    recently_traded = {}  # symbol -> timestamp, Cooldown nach Rotation
 
     active = Config.ACTIVE_STRATEGIES
     print(f"\n  Active strategies: {', '.join(active)}")
@@ -193,15 +194,20 @@ def run_bot():
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
 
             # Markt-Trend-Filter via BTC
-            btc_df = exchange.get_ohlcv("BTC/EUR", "1h", limit=6)
+            btc_df = exchange.get_ohlcv("BTC/EUR", "1h", limit=3)  # 3h statt 6h → schnellere Reaktion
             market_bullish = False
             market_bearish = False
             if not btc_df.empty:
                 btc_change = (btc_df["close"].iloc[-1] - btc_df["close"].iloc[0]) / btc_df["close"].iloc[0]
-                market_bullish = btc_change > 0.005   # BTC +0.5% in letzten 6h → bullish
-                market_bearish = btc_change < -0.005  # BTC -0.5% in letzten 6h → bearish
+                market_bullish = btc_change > 0.004
+                market_bearish = btc_change < -0.004
                 trend_str = f"BTC {btc_change*100:+.2f}% → {'BULLISH' if market_bullish else 'BEARISH' if market_bearish else 'NEUTRAL'}"
                 print(f"  Markt: {trend_str}")
+
+            # Fix 3: Verlustbremse — bei -3% Tages-P&L keine neuen Longs
+            loss_brake = daily_pnl < -3.0
+            if loss_brake:
+                print(f"  ⚠️  VERLUSTBREMSE aktiv ({daily_pnl:.2f}%) — nur Shorts erlaubt")
 
             # 1. Check exits first
             exits = check_exits(exchange, risk_mgr, logger, notifier)
@@ -231,6 +237,12 @@ def run_bot():
             for symbol in target_symbols:
                 if symbol in risk_mgr.open_positions:
                     continue  # already holding
+                # Fix 2: Cooldown — 30min nach letztem Trade in diesem Coin
+                cooldown_secs = 30 * 60
+                if symbol in recently_traded and (time.time() - recently_traded[symbol]) < cooldown_secs:
+                    remaining = int((cooldown_secs - (time.time() - recently_traded[symbol])) / 60)
+                    print(f"  {symbol} Cooldown noch {remaining}min")
+                    continue
 
                 print(f"\n  Analyzing {symbol}...")
                 df = exchange.get_ohlcv(symbol, "15m", limit=100)
@@ -244,17 +256,17 @@ def run_bot():
 
                 signals = []
 
-                # Momentum (Long + Short) — BTC als Gewichtung, nicht als Sperre
+                # Momentum (Long + Short) — BTC als Gewichtung + Verlustbremse
                 if "momentum" in active:
                     sig = momentum.analyze(df)
                     strong = sig.get("leverage", 1) >= 2
                     if sig["signal"] == Signal.BUY:
-                        # BTC bearish → nur starke Long-Signale zulassen
-                        if not market_bearish or strong:
+                        if loss_brake:
+                            pass  # Verlustbremse: keine Longs
+                        elif not market_bearish or strong:
                             signals.append(sig)
                             print(f"    [momentum] BUY: {sig['reason']}")
                     elif sig["signal"] == Signal.SELL:
-                        # BTC bullish → nur starke Short-Signale zulassen
                         if not market_bullish or strong:
                             sig["direction"] = "short"
                             signals.append(sig)
@@ -315,8 +327,13 @@ def run_bot():
                                 print(f"    Closed {weakest} P&L {rot_pnl:+.2f}EUR, cash now {balance:.2f}EUR")
 
                     print(f"    >> Executing {best['strategy']} {direction.upper()} signal")
-                    execute_trade(exchange, risk_mgr, logger, notifier,
-                                  symbol, side, best, balance)
+                    traded = execute_trade(exchange, risk_mgr, logger, notifier,
+                                          symbol, side, best, balance)
+                    if traded:
+                        recently_traded[symbol] = time.time()
+                    # auch rotierter Coin in Cooldown
+                    if 'weakest' in dir() and weakest:
+                        recently_traded[weakest] = time.time()
 
             # 5. Print status
             summary = logger.get_summary()
