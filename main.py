@@ -179,6 +179,27 @@ def run_bot():
     # Restore open positions from trade log (survives Railway restarts)
     _restore_positions(risk_mgr, exchange)
 
+    # /status Telegram-Command
+    def send_status():
+        port = risk_mgr.get_portfolio_value(exchange)
+        bal  = exchange.get_balance()
+        pnl  = risk_mgr.get_daily_pnl_pct(exchange)
+        pos  = risk_mgr.open_positions
+        lines = [f"📊 *Portfolio Status*\n",
+                 f"💰 Cash: `{bal:.2f}EUR`",
+                 f"📈 Portfolio: `{port:.2f}EUR`",
+                 f"🎯 Tages-P&L: `{pnl:+.2f}%`",
+                 f"📂 Offene Positionen: {len(pos)}"]
+        for sym, p in pos.items():
+            ticker = exchange.get_ticker(sym)
+            cur = ticker.get("last", 0) if ticker else 0
+            d = p.get("direction", "long")
+            unreal = (cur - p["entry_price"]) * p["volume"] if d == "long" else (p["entry_price"] - cur) * p["volume"]
+            icon = "🟢" if unreal >= 0 else "🔴"
+            lines.append(f"  {icon} {sym} [{d.upper()}]: `{unreal:+.2f}EUR`")
+        notifier.send("\n".join(lines))
+    notifier.set_status_callback(send_status)
+
     # Echten Portfoliowert als Startpunkt setzen (nicht INITIAL_CAPITAL)
     # Verhindert Reset des Tages-P&L nach Neustart
     actual_portfolio = risk_mgr.get_portfolio_value(exchange)
