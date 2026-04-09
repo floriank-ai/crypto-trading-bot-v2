@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 
 from config import Config
+from auto_optimizer import should_run_today, run as run_optimizer, load_state
 from exchange import Exchange
 from scanner import CoinScanner
 from strategies import MomentumStrategy, GridStrategy, DCAStrategy, Signal
@@ -186,6 +187,11 @@ def run_bot():
     print(f"  Starting in 3 seconds...\n")
     time.sleep(3)
 
+    # Optimizer-State laden (Skip-Liste aus letztem Backtest)
+    optimizer_state = load_state()
+    Config.MOMENTUM_SKIP = optimizer_state.get("skip_list", Config.MOMENTUM_SKIP)
+    print(f"  Momentum-Skip: {Config.MOMENTUM_SKIP}")
+
     cycle = 0
     peak_portfolio = Config.INITIAL_CAPITAL
     hwm_pause_until = 0
@@ -201,6 +207,12 @@ def run_bot():
 
             balance = exchange.get_balance()
             portfolio_val = risk_mgr.get_portfolio_value(exchange)
+
+            # Wöchentlicher Auto-Optimizer (jeden Sonntag)
+            if should_run_today():
+                new_skip = run_optimizer(notifier)
+                Config.MOMENTUM_SKIP = new_skip
+                print(f"  [Optimizer] Neue Skip-Liste aktiv: {new_skip}")
 
             # Mitternacht-Reset
             if datetime.now().date() != today:
