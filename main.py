@@ -179,6 +179,9 @@ def run_bot():
     time.sleep(3)
 
     cycle = 0
+    peak_portfolio = Config.INITIAL_CAPITAL
+    hwm_pause_until = 0  # High-Water-Mark Pause bis zu diesem Timestamp
+
     while True:
         try:
             cycle += 1
@@ -192,6 +195,42 @@ def run_bot():
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
+
+            # High-Water-Mark: Peak tracken und Gewinn sichern
+            if portfolio_val > peak_portfolio:
+                peak_portfolio = portfolio_val
+            drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
+            meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
+            if meaningful_gain and drawdown_from_peak >= 3.0 and time.time() > hwm_pause_until:
+                print(f"\n  🔒 HIGH-WATER-MARK: -{drawdown_from_peak:.1f}% vom Peak ({peak_portfolio:.2f}→{portfolio_val:.2f}EUR) — schliesse alle Positionen!")
+                notifier.send(f"🔒 *HIGH-WATER-MARK*\nPortfolio fiel {drawdown_from_peak:.1f}% vom Peak\n{peak_portfolio:.2f}EUR → {portfolio_val:.2f}EUR\nSchliesse alle Positionen & pause 30min")
+                for sym in list(risk_mgr.open_positions.keys()):
+                    pos = risk_mgr.open_positions[sym]
+                    res = exchange.place_order(sym, "sell", pos["volume"])
+                    if res["status"] == "ok":
+                        p = res.get("price", pos["entry_price"])
+                        c = res.get("cost", pos["volume"] * p)
+                        f = res.get("fee", c * 0.0026)
+                        pnl = (p - pos["entry_price"]) * pos["volume"]
+                        logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
+                                         price=p, cost=c, fee=f,
+                                         mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                         signal_reason="hwm_protection",
+                                         balance_after=exchange.get_balance())
+                        print(f"    Closed {sym} P&L {pnl:+.2f}EUR")
+                    risk_mgr.close_position(sym)
+                hwm_pause_until = time.time() + 1800  # 30 Minuten Pause
+                peak_portfolio = risk_mgr.get_portfolio_value(exchange)  # neuer Peak nach Close
+                print(f"  Pause bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')}")
+                time.sleep(Config.CHECK_INTERVAL)
+                continue
+
+            # HWM Pause aktiv
+            if time.time() < hwm_pause_until:
+                remaining = int((hwm_pause_until - time.time()) / 60)
+                print(f"  🔒 HWM-Pause: noch {remaining}min — keine neuen Trades")
+                time.sleep(Config.CHECK_INTERVAL)
+                continue
 
             # Markt-Trend-Filter via BTC
             btc_df = exchange.get_ohlcv("BTC/EUR", "1h", limit=3)  # 3h statt 6h → schnellere Reaktion
