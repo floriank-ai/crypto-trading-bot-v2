@@ -28,6 +28,9 @@ class Config:
     # Strategies
     ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,grid,dca,sentiment").split(",")
 
+    # Momentum: Diese Coins werden für Momentum-Trades gemieden (Backtest: schlechte Performance)
+    MOMENTUM_SKIP = os.getenv("MOMENTUM_SKIP", "BTC/EUR,ETH/EUR,ADA/EUR").split(",")
+
     # Scanner
     SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 30))
     AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 5))

@@ -321,7 +321,7 @@ def run_bot():
                 signals = []
 
                 # Momentum (Long + Short) — BTC als Gewichtung + Verlustbremse
-                if "momentum" in active:
+                if "momentum" in active and symbol not in Config.MOMENTUM_SKIP:
                     sig = momentum.analyze(df)
                     strong = sig.get("leverage", 1) >= 2
                     if sig["signal"] == Signal.BUY:
