@@ -179,7 +179,13 @@ def run_bot():
     # Restore open positions from trade log (survives Railway restarts)
     _restore_positions(risk_mgr, exchange)
 
-    logger.log_session_start(Config.INITIAL_CAPITAL)
+    # Echten Portfoliowert als Startpunkt setzen (nicht INITIAL_CAPITAL)
+    # Verhindert Reset des Tages-P&L nach Neustart
+    actual_portfolio = risk_mgr.get_portfolio_value(exchange)
+    risk_mgr.daily_start_value = actual_portfolio
+    print(f"  [Restore] Tages-Startpunkt: {actual_portfolio:.2f}EUR")
+
+    logger.log_session_start(actual_portfolio)
     recently_traded = {}  # symbol -> timestamp, Cooldown nach Rotation
 
     active = Config.ACTIVE_STRATEGIES
@@ -193,7 +199,7 @@ def run_bot():
     print(f"  Momentum-Skip: {Config.MOMENTUM_SKIP}")
 
     cycle = 0
-    peak_portfolio = Config.INITIAL_CAPITAL
+    peak_portfolio = actual_portfolio  # echter Wert, nicht INITIAL_CAPITAL
     hwm_pause_until = 0
     today = datetime.now().date()
 
