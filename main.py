@@ -121,17 +121,25 @@ def check_exits(exchange, risk_manager, logger, notifier):
 
         if exit_type:
             pos = risk_manager.open_positions[symbol]
-            print(f"  >> {exit_type.upper()} triggered: {symbol}")
+            direction = pos.get("direction", "long")
+            print(f"  >> {exit_type.upper()} triggered: {symbol} [{direction}]")
 
-            result = exchange.place_order(symbol, "sell", pos["volume"])
+            close_side = "buy" if direction == "short" else "sell"
+            result = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
             if result["status"] == "ok":
-                sell_price = result.get("price", current_price)
-                pnl = (sell_price - pos["entry_price"]) * pos["volume"]
-                cost = result.get("cost", pos["volume"] * sell_price)
+                close_price = result.get("price", current_price)
+                cost = result.get("cost", pos["volume"] * close_price)
                 fee = result.get("fee", cost * 0.0026)
 
-                logger.log_trade(pair=symbol, side="sell", volume=pos["volume"],
-                                 price=sell_price, cost=cost, fee=fee,
+                if direction == "short":
+                    pnl = (pos["entry_price"] - close_price) * pos["volume"] - 2 * fee
+                    log_side = "cover"
+                else:
+                    pnl = (close_price - pos["entry_price"]) * pos["volume"] - 2 * fee
+                    log_side = "sell"
+
+                logger.log_trade(pair=symbol, side=log_side, volume=pos["volume"],
+                                 price=close_price, cost=cost, fee=fee,
                                  mode=Config.TRADING_MODE, strategy=pos["strategy"],
                                  signal_reason=exit_type,
                                  balance_after=exchange.get_balance())
@@ -180,7 +188,8 @@ def run_bot():
 
     cycle = 0
     peak_portfolio = Config.INITIAL_CAPITAL
-    hwm_pause_until = 0  # High-Water-Mark Pause bis zu diesem Timestamp
+    hwm_pause_until = 0
+    today = datetime.now().date()
 
     while True:
         try:
@@ -192,9 +201,25 @@ def run_bot():
 
             balance = exchange.get_balance()
             portfolio_val = risk_mgr.get_portfolio_value(exchange)
+
+            # Mitternacht-Reset
+            if datetime.now().date() != today:
+                today = datetime.now().date()
+                risk_mgr.daily_start_value = portfolio_val
+                peak_portfolio = portfolio_val
+                print(f"  🌅 Neuer Tag — Tages-Zähler zurückgesetzt auf {portfolio_val:.2f}EUR")
+                notifier.send(f"🌅 Neuer Tag\nNeuer Startpunkt: {portfolio_val:.2f}EUR")
+
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
+
+            # Tageslimit: bei -5% keine neuen Trades bis Mitternacht
+            if daily_pnl < -5.0:
+                print(f"  🛑 TAGESLIMIT -5% ({daily_pnl:.2f}%) — pausiere bis Mitternacht")
+                notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% Tagesverlust\nKeine neuen Trades bis Mitternacht")
+                time.sleep(Config.CHECK_INTERVAL)
+                continue
 
             # High-Water-Mark: Peak tracken und Gewinn sichern
             if portfolio_val > peak_portfolio:
@@ -342,6 +367,7 @@ def run_bot():
                     side = "sell" if direction == "short" else "buy"
 
                     # Rotation: if strong signal (leverage>=2) but slots full or barely any cash, close weakest
+                    weakest = None
                     is_strong = best.get("leverage", 1) >= Config.ROTATION_MIN_LEVERAGE
                     no_slots = len(risk_mgr.open_positions) >= risk_mgr.max_positions
                     low_cash = balance < 20  # only rotate if barely any cash left
@@ -370,8 +396,7 @@ def run_bot():
                                           symbol, side, best, balance)
                     if traded:
                         recently_traded[symbol] = time.time()
-                    # auch rotierter Coin in Cooldown
-                    if 'weakest' in dir() and weakest:
+                    if weakest:
                         recently_traded[weakest] = time.time()
 
             # 5. Print status

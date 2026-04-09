@@ -75,30 +75,32 @@ class TradeLogger:
 
     def get_summary(self) -> dict:
         if not os.path.exists(self.json_path):
-            return {"total_trades": 0, "pnl": 0}
+            return {"total_trades": 0, "realized_pnl": 0, "total_fees_eur": 0, "strategies": {}}
         with open(self.json_path, "r") as f:
-            trades = json.load(f)
+            all_entries = json.load(f)
 
-        trades = [t for t in trades if not t.get("session_start")]
-        buys = sum(t["total_eur"] for t in trades if t["side"] == "buy")
-        sells = sum(t["total_eur"] for t in trades if t["side"] == "sell")
+        # Nur aktuelle Session
+        si = max((i for i, e in enumerate(all_entries) if e.get("session_start")), default=-1)
+        trades = [e for e in all_entries[si+1:] if not e.get("session_start")]
+
+        if not trades:
+            return {"total_trades": 0, "realized_pnl": 0, "total_fees_eur": 0, "strategies": {}}
+
+        # P&L: Einnahmen (sell/cover) minus Ausgaben (buy/short)
+        money_in  = sum(t["total_eur"] for t in trades if t["side"] in ("sell", "cover"))
+        money_out = sum(t["total_eur"] for t in trades if t["side"] in ("buy", "short"))
         fees = sum(t["fee_eur"] for t in trades)
 
-        # Per strategy breakdown
         strats = {}
         for t in trades:
             s = t.get("strategy", "unknown")
             if s not in strats:
-                strats[s] = {"buys": 0, "sells": 0, "count": 0}
+                strats[s] = {"count": 0}
             strats[s]["count"] += 1
-            if t["side"] == "buy":
-                strats[s]["buys"] += t["total_eur"]
-            else:
-                strats[s]["sells"] += t["total_eur"]
 
         return {
             "total_trades": len(trades),
             "total_fees_eur": round(fees, 4),
-            "realized_pnl": round(sells - buys, 2),
+            "realized_pnl": round(money_in - money_out, 2),
             "strategies": strats,
         }
