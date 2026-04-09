@@ -21,19 +21,38 @@ from strategies import MomentumStrategy, Signal
 
 STATE_PATH = os.path.join("logs", "optimizer_state.json")
 
-# Coins die der Optimizer bewerten soll
-OPTIMIZER_SYMBOLS = [
-    "BTC/EUR", "ETH/EUR", "SOL/EUR", "ADA/EUR",
-    "XRP/EUR", "AVAX/EUR", "LINK/EUR", "DOT/EUR",
-    "BNB/EUR", "MATIC/EUR", "ATOM/EUR", "NEAR/EUR",
-]
-
 SKIP_THRESHOLD  = -10.0   # EUR — schlechter als das → überspringen
 KEEP_THRESHOLD  =  10.0   # EUR — besser als das → wieder aufnehmen
 MONTHS          = 3
 POSITION_PCT    = 0.20
 FEE_PCT         = 0.0026
 WARMUP          = 50
+MIN_CANDLES     = 500     # Mindest-Kerzen für aussagekräftigen Backtest (~5 Tage)
+
+
+def get_testable_symbols() -> list[str]:
+    """
+    Gibt alle Kraken EUR-Paare zurück die auch auf Binance als USDT-Paar verfügbar sind.
+    So werden alle vom Scanner gefundenen Coins berücksichtigt.
+    """
+    try:
+        kraken = ccxt.kraken({"enableRateLimit": True})
+        kraken.load_markets()
+        kraken_eur = [s for s in kraken.symbols if s.endswith("/EUR")
+                      and kraken.markets[s].get("active", True)]
+
+        binance = ccxt.binance({"enableRateLimit": True})
+        binance.load_markets()
+        binance_usdt = set(s.split("/")[0] for s in binance.symbols if s.endswith("/USDT"))
+
+        testable = [s for s in kraken_eur if s.split("/")[0] in binance_usdt]
+        print(f"  [Optimizer] {len(kraken_eur)} Kraken EUR-Paare → {len(testable)} auf Binance testbar")
+        return sorted(testable)
+    except Exception as e:
+        print(f"  [Optimizer] Fehler beim Laden der Symbole: {e}")
+        # Fallback auf bekannte Coins
+        return ["BTC/EUR", "ETH/EUR", "SOL/EUR", "ADA/EUR", "XRP/EUR",
+                "AVAX/EUR", "LINK/EUR", "DOT/EUR", "BNB/EUR", "ATOM/EUR"]
 
 
 # ── Persistenz ─────────────────────────────────────────────────────────────
@@ -68,12 +87,13 @@ def should_run_today() -> bool:
 
 # ── Daten & Backtest ────────────────────────────────────────────────────────
 
-def _fetch_binance(symbol: str, months: int) -> pd.DataFrame:
+def _fetch_binance(symbol: str, months: int, binance_exchange=None) -> pd.DataFrame:
     base = symbol.split("/")[0]
     binance_sym = f"{base}/USDT"
     try:
-        b = ccxt.binance({"enableRateLimit": True})
-        b.load_markets()
+        b = binance_exchange or ccxt.binance({"enableRateLimit": True})
+        if not binance_exchange:
+            b.load_markets()
         if binance_sym not in b.symbols:
             return pd.DataFrame()
         since = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp() * 1000)
@@ -158,21 +178,27 @@ def run(notifier=None) -> list[str]:
     Führt den Backtest durch, aktualisiert die Skip-Liste und
     gibt die neue Skip-Liste zurück. Schickt Telegram-Bericht.
     """
-    print("\n  [Optimizer] Starte wöchentlichen Backtest...")
+    print("\n  [Optimizer] Starte wöchentlichen Backtest aller Kraken-Coins...")
     state = load_state()
     current_skip = set(state.get("skip_list", list(Config.MOMENTUM_SKIP)))
     results = {}
 
-    for symbol in OPTIMIZER_SYMBOLS:
-        print(f"  [Optimizer] Lade {symbol}...", end=" ", flush=True)
-        df = _fetch_binance(symbol, MONTHS)
-        if df.empty or len(df) < WARMUP + 10:
-            print("keine Daten")
+    symbols = get_testable_symbols()
+
+    # Binance einmal laden und wiederverwenden (spart Zeit)
+    binance = ccxt.binance({"enableRateLimit": True})
+    binance.load_markets()
+
+    for symbol in symbols:
+        print(f"  [Optimizer] {symbol}...", end=" ", flush=True)
+        df = _fetch_binance(symbol, MONTHS, binance_exchange=binance)
+        if df.empty or len(df) < MIN_CANDLES:
+            print("übersprungen (zu wenig Daten)")
             continue
         pnl = _backtest_coin(df)
         results[symbol] = pnl
-        print(f"P&L: {pnl:+.2f}EUR")
-        time.sleep(0.3)
+        print(f"{pnl:+.2f}EUR")
+        time.sleep(0.15)
 
     # Skip-Liste aktualisieren
     added, removed = [], []
@@ -200,18 +226,22 @@ def run(notifier=None) -> list[str]:
         print(f"    {sym:15s} {pnl:+7.2f}EUR  {status}")
     print(f"  [Optimizer] Skip-Liste: {new_skip}")
 
-    # Telegram-Bericht
+    # Telegram-Bericht (nur Top 5, Bottom 5 und Änderungen)
     if notifier:
-        lines = ["📊 *Wöchentlicher Backtest (3 Monate)*\n"]
-        for sym, pnl in ranked:
-            icon = "⛔" if sym in current_skip else "✅"
-            lines.append(f"{icon} {sym}: `{pnl:+.0f}EUR`")
+        lines = [f"📊 *Wöchentlicher Backtest* ({len(results)} Coins, 3 Monate)\n"]
+        lines.append("🏆 *Top 5:*")
+        for sym, pnl in ranked[:5]:
+            lines.append(f"  ✅ {sym}: `{pnl:+.0f}EUR`")
+        lines.append("\n💀 *Schlechteste 5:*")
+        for sym, pnl in ranked[-5:]:
+            lines.append(f"  ⛔ {sym}: `{pnl:+.0f}EUR`")
         if added:
-            lines.append(f"\n🆕 Neu übersprungen: {', '.join(added)}")
+            lines.append(f"\n🆕 Neu Skip: {', '.join(added)}")
         if removed:
             lines.append(f"\n♻️ Wieder aktiv: {', '.join(removed)}")
         if not added and not removed:
-            lines.append("\nKeine Änderungen an der Skip-Liste.")
+            lines.append("\n_Keine Änderungen._")
+        lines.append(f"\nSkip-Liste: {len(new_skip)} Coins")
         notifier.send("\n".join(lines))
 
     return new_skip
