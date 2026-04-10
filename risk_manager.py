@@ -1,4 +1,8 @@
+import json
+import os
 from config import Config
+
+POSITIONS_PATH = os.path.join("logs", "positions.json")
 
 
 class RiskManager:
@@ -172,6 +176,7 @@ class RiskManager:
             "direction": direction,
             "margin": margin,
         }
+        self._save_positions()
 
     def check_exit(self, symbol: str, current_price: float) -> str | None:
         if symbol not in self.open_positions:
@@ -193,7 +198,18 @@ class RiskManager:
         return None
 
     def close_position(self, symbol: str) -> dict | None:
-        return self.open_positions.pop(symbol, None)
+        result = self.open_positions.pop(symbol, None)
+        self._save_positions()
+        return result
+
+    def _save_positions(self):
+        """Persist open positions to disk so restarts don't lose them."""
+        os.makedirs("logs", exist_ok=True)
+        try:
+            with open(POSITIONS_PATH, "w") as f:
+                json.dump(self.open_positions, f, indent=2)
+        except Exception as e:
+            print(f"  [Positions] Save error: {e}")
 
     def get_portfolio_value(self, exchange) -> float:
         """Calculate total portfolio value including open positions."""

@@ -24,54 +24,21 @@ from notifier import Notifier
 
 
 def _restore_positions(risk_mgr, exchange):
-    """Reconstruct open positions from trade log after restart."""
+    """Restore open positions from positions.json (written after every trade)."""
     import json, os
-    json_path = os.path.join("logs", "trades.json")
-    if not os.path.exists(json_path):
+    pos_path = os.path.join("logs", "positions.json")
+    if not os.path.exists(pos_path):
+        print("  [Restore] Keine positions.json — Neustart ohne offene Positionen")
         return
     try:
-        with open(json_path) as f:
-            entries = json.load(f)
-
-        # Nur letzte Session
-        si = max((i for i, e in enumerate(entries) if e.get("session_start")), default=-1)
-        trades = [e for e in entries[si+1:] if not e.get("session_start")]
-        if not trades:
+        with open(pos_path) as f:
+            positions = json.load(f)
+        if not positions:
+            print("  [Restore] positions.json leer — keine offenen Positionen")
             return
-
-        positions = {}
-        for t in trades:
-            sym      = t["pair"]
-            side     = t["side"]
-            vol      = float(t["volume"])
-            price    = float(t["price_eur"])
-            strategy = t.get("strategy", "momentum")
-
-            if side in ("buy", "short"):  # Position öffnen
-                direction = "short" if side == "short" else "long"
-                if sym not in positions:
-                    positions[sym] = {
-                        "volume": 0.0, "total_cost": 0.0,
-                        "direction": direction, "strategy": strategy,
-                    }
-                positions[sym]["volume"]     = round(positions[sym]["volume"] + vol, 8)
-                positions[sym]["total_cost"] += vol * price
-
-            elif side in ("sell", "cover"):  # Position schliessen (long sell + short cover)
-                if sym in positions:
-                    positions[sym]["volume"] = round(positions[sym]["volume"] - vol, 8)
-                    if positions[sym]["volume"] <= 0.00001:
-                        del positions[sym]
-
-        # Offene Positionen registrieren
-        count = 0
         for sym, pos in positions.items():
-            if pos["volume"] < 0.00001:
-                continue
-            avg_entry = pos["total_cost"] / pos["volume"]
-            direction = pos["direction"]
-            risk_mgr.open_position(sym, avg_entry, pos["volume"], pos["strategy"], direction)
-
+            risk_mgr.open_positions[sym] = pos
+            direction = pos.get("direction", "long")
             if direction == "long":
                 exchange.paper_positions[sym] = pos["volume"]
             else:
@@ -79,17 +46,11 @@ def _restore_positions(risk_mgr, exchange):
                     exchange.paper_short_positions = {}
                 exchange.paper_short_positions[sym] = {
                     "volume": pos["volume"],
-                    "entry_price": avg_entry,
-                    "margin": avg_entry * pos["volume"] * 0.20,
+                    "entry_price": pos["entry_price"],
+                    "margin": pos.get("margin", pos["entry_price"] * pos["volume"] * 0.20),
                 }
-            count += 1
-            print(f"    {sym} [{direction.upper()}] vol={pos['volume']:.6f} @ {avg_entry:.4f}")
-
-        if count:
-            print(f"  [Restore] {count} Positionen wiederhergestellt")
-        else:
-            print(f"  [Restore] Keine offenen Positionen gefunden")
-
+            print(f"    {sym} [{direction.upper()}] vol={pos['volume']:.6f} @ {pos['entry_price']:.4f} SL={pos['stop_loss']:.4f}")
+        print(f"  [Restore] {len(positions)} Positionen (inkl. Trailing-SL) wiederhergestellt")
     except Exception as e:
         print(f"  [Restore] Fehler: {e}")
         import traceback
