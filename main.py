@@ -253,9 +253,10 @@ def run_bot():
     print(f"  Momentum-Skip: {Config.MOMENTUM_SKIP}")
 
     cycle = 0
-    peak_portfolio = actual_portfolio  # echter Wert, nicht INITIAL_CAPITAL
+    peak_portfolio = actual_portfolio
     hwm_pause_until = 0
     today = datetime.now().date()
+    last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
     while True:
         try:
@@ -267,6 +268,24 @@ def run_bot():
 
             balance = exchange.get_balance()
             portfolio_val = risk_mgr.get_portfolio_value(exchange)
+
+            # 4h-Bericht via Telegram
+            current_hour = datetime.now().hour
+            if current_hour % 4 == 0 and current_hour != last_report_hour:
+                last_report_hour = current_hour
+                pos = risk_mgr.open_positions
+                best  = max(pos.items(), key=lambda x: (exchange.get_ticker(x[0]) or {}).get("last", x[1]["entry_price"]) * x[1]["volume"] - x[1]["entry_price"] * x[1]["volume"], default=(None, None))
+                worst = min(pos.items(), key=lambda x: (exchange.get_ticker(x[0]) or {}).get("last", x[1]["entry_price"]) * x[1]["volume"] - x[1]["entry_price"] * x[1]["volume"], default=(None, None))
+                best_pnl  = ((exchange.get_ticker(best[0])  or {}).get("last", best[1]["entry_price"])  - best[1]["entry_price"])  * best[1]["volume"]  if best[0]  else 0
+                worst_pnl = ((exchange.get_ticker(worst[0]) or {}).get("last", worst[1]["entry_price"]) - worst[1]["entry_price"]) * worst[1]["volume"] if worst[0] else 0
+                notifier.send(
+                    f"📊 *{datetime.now().strftime('%H:%M')} Uhr Update*\n"
+                    f"💰 Portfolio: `{portfolio_val:.2f}EUR` ({daily_pnl:+.2f}%)\n"
+                    f"💵 Cash: `{balance:.2f}EUR`\n"
+                    f"📂 Positionen: {len(pos)}\n"
+                    + (f"🏆 Bester: {best[0]} `{best_pnl:+.2f}EUR`\n" if best[0] else "")
+                    + (f"💀 Schlechtester: {worst[0]} `{worst_pnl:+.2f}EUR`" if worst[0] else "")
+                )
 
             # Wöchentlicher Auto-Optimizer (jeden Sonntag)
             if should_run_today():
