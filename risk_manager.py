@@ -54,23 +54,23 @@ class RiskManager:
 
         if direction == "long":
             pnl_pct = (current_price - entry) / entry
-            if pnl_pct >= 0.10:
-                # Ab +10%: SL auf +5% nachziehen
+            if pnl_pct >= 0.09:
+                # Ab +9%: SL 3% unter aktuellem Preis nachziehen
                 new_sl = current_price * (1 - 0.03)
                 if new_sl > pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
-            elif pnl_pct >= 0.05:
-                # Ab +5%: SL auf Break-Even
+            elif pnl_pct >= 0.06:
+                # Ab +6%: SL auf Break-Even (Einstiegspreis)
                 new_sl = entry * 1.001
                 if new_sl > pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
         else:  # short
             pnl_pct = (entry - current_price) / entry
-            if pnl_pct >= 0.10:
+            if pnl_pct >= 0.09:
                 new_sl = current_price * (1 + 0.03)
                 if new_sl < pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
-            elif pnl_pct >= 0.05:
+            elif pnl_pct >= 0.06:
                 new_sl = entry * 0.999
                 if new_sl < pos["stop_loss"]:
                     pos["stop_loss"] = new_sl

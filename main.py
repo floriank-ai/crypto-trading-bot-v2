@@ -151,6 +151,7 @@ def check_exits(exchange, risk_manager, logger, notifier):
             continue
 
         current_price = ticker["last"]
+        risk_manager.update_trailing_stop(symbol, current_price)
         exit_type = risk_manager.check_exit(symbol, current_price)
 
         if exit_type:
