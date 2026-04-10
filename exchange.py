@@ -18,7 +18,22 @@ class Exchange:
         self.paper_balance = Config.INITIAL_CAPITAL
         self.paper_positions = {}
         self._markets_loaded = False
-        self._restore_paper_balance()
+        if os.getenv("RESET_PAPER_BALANCE") == "1":
+            self._reset_paper_state()
+        else:
+            self._restore_paper_balance()
+
+    def _reset_paper_state(self):
+        """Hard reset: wipe logs and start fresh with INITIAL_CAPITAL."""
+        for path in [os.path.join("logs", "trades.json"), os.path.join("logs", "positions.json")]:
+            try:
+                os.makedirs("logs", exist_ok=True)
+                with open(path, "w") as f:
+                    f.write("[]" if path.endswith("trades.json") else "{}")
+            except Exception:
+                pass
+        self.paper_balance = Config.INITIAL_CAPITAL
+        print(f"  [Reset] Paper Trading zurückgesetzt auf {Config.INITIAL_CAPITAL:.2f} EUR")
 
     def _restore_paper_balance(self):
         """Restore paper balance from trades.json on restart (for persistent deployments)."""
