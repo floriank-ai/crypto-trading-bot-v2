@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """
-Backtest: Testet die Momentum-Strategie gegen historische Kraken-Daten.
+Backtest: Testet die Momentum-Strategie gegen historische Daten.
 Nutzt exakt denselben Strategy-Code wie der Live-Bot.
 
-Usage: python backtest.py
+Datenquellen:
+  --source kraken       letzte 7 Tage (Standard)
+  --source cryptocompare  bis zu 3 Monate historische Daten (kostenlos, kein API Key)
+
+Usage:
+  python backtest.py
+  python backtest.py --source cryptocompare --months 3
 """
 
+import argparse
 import ccxt
+import requests
 import pandas as pd
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import Config
 from strategies import MomentumStrategy, Signal
 
@@ -30,7 +38,7 @@ WARMUP_CANDLES    = 50     # Mindest-Kerzen für Indikatoren
 
 # ── Daten laden ────────────────────────────────────────────────────────────
 
-def fetch_data(exchange, symbol):
+def fetch_data_kraken(exchange, symbol):
     try:
         ohlcv = exchange.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLE_LIMIT)
         if not ohlcv:
@@ -41,6 +49,51 @@ def fetch_data(exchange, symbol):
     except Exception as e:
         print(f"    Fehler beim Laden von {symbol}: {e}")
         return pd.DataFrame()
+
+
+def fetch_data_binance(symbol, months=3):
+    """
+    Lädt bis zu 3 Monate 15min-Daten von Binance (kostenlos, kein API Key).
+    Nutzt USDT-Paare (BTC/USDT statt BTC/EUR) — Preismuster identisch.
+    Paginiert automatisch in 1000er-Blöcken.
+    """
+    base = symbol.split("/")[0]
+    binance_symbol = f"{base}/USDT"
+
+    total_candles = months * 30 * 24 * 4  # 15min-Kerzen
+    all_rows = []
+
+    try:
+        binance = ccxt.binance({"enableRateLimit": True})
+        binance.load_markets()
+        if binance_symbol not in binance.symbols:
+            print(f"    {binance_symbol} nicht auf Binance verfügbar")
+            return pd.DataFrame()
+
+        since_ms = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp() * 1000)
+
+        while len(all_rows) < total_candles:
+            batch = binance.fetch_ohlcv(binance_symbol, "15m", since=since_ms, limit=1000)
+            if not batch:
+                break
+            all_rows.extend(batch)
+            last_ts = batch[-1][0]
+            since_ms = last_ts + 1
+            if len(batch) < 1000:
+                break
+            time.sleep(0.2)
+
+    except Exception as e:
+        print(f"    Binance Fehler: {e}")
+        return pd.DataFrame()
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows, columns=["time", "open", "high", "low", "close", "volume"])
+    df["time"] = pd.to_datetime(df["time"], unit="ms")
+    df = df[df["close"] > 0].reset_index(drop=True)
+    return df
 
 
 # ── Backtest-Engine ────────────────────────────────────────────────────────
@@ -203,26 +256,49 @@ def print_results(results):
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", choices=["kraken", "binance"], default="kraken",
+                        help="Datenquelle (default: kraken = letzte 7 Tage, binance = bis 3 Monate)")
+    parser.add_argument("--months", type=int, default=3,
+                        help="Monate historische Daten bei Binance (default: 3)")
+    parser.add_argument("--tp", type=float, default=None,
+                        help="Take-Profit in Prozent ueberschreiben z.B. 12 fuer 12 Prozent")
+    args = parser.parse_args()
+
+    global TAKE_PROFIT_PCT
+    if args.tp is not None:
+        TAKE_PROFIT_PCT = args.tp / 100.0
+
+    source_label = f"Binance — letzte {args.months} Monate (USDT-Paare)" if args.source == "binance" \
+                   else "Kraken — letzte 7 Tage"
+
     print("\n" + "=" * 70)
-    print("  CRYPTO BACKTEST — letzte 7 Tage (15min Kerzen, Kraken)")
+    print(f"  CRYPTO BACKTEST — {source_label} (15min Kerzen)")
     print(f"  SL: {STOP_LOSS_PCT*100:.0f}%  |  TP: {TAKE_PROFIT_PCT*100:.0f}%  |  Position: {POSITION_SIZE_PCT*100:.0f}%  |  Fee: {FEE_PCT*100:.2f}%")
     print("=" * 70)
 
-    exchange = ccxt.kraken({"enableRateLimit": True})
-    exchange.load_markets()
+    exchange = None
+    if args.source == "kraken":
+        exchange = ccxt.kraken({"enableRateLimit": True})
+        exchange.load_markets()
 
     results = []
     for symbol in SYMBOLS:
         print(f"\n  Lade {symbol}...", end=" ", flush=True)
-        df = fetch_data(exchange, symbol)
+
+        if args.source == "binance":
+            df = fetch_data_binance(symbol, months=args.months)
+        else:
+            df = fetch_data_kraken(exchange, symbol)
+
         if df.empty or len(df) < WARMUP_CANDLES + 10:
             print("nicht genug Daten")
             continue
-        period = f"{df['time'].iloc[0].strftime('%d.%m %H:%M')} → {df['time'].iloc[-1].strftime('%d.%m %H:%M')}"
+
+        period = f"{df['time'].iloc[0].strftime('%d.%m.%y %H:%M')} → {df['time'].iloc[-1].strftime('%d.%m.%y %H:%M')}"
         print(f"{len(df)} Kerzen  [{period}]")
         result = run_backtest(df, symbol)
         results.append(result)
-        time.sleep(0.3)
 
     print_results(results)
 

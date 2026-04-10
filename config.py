@@ -19,7 +19,7 @@ class Config:
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))
     STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.08))
-    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.20))
+    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.12))
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
     MIN_CASH_RESERVE_PCT = float(os.getenv("MIN_CASH_RESERVE_PCT", 0.15))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
