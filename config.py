@@ -25,14 +25,14 @@ class Config:
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
     # Strategies
-    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,grid,sentiment").split(",")
+    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment").split(",")
 
     # Momentum: Diese Coins werden für Momentum-Trades gemieden (Backtest: schlechte Performance)
     MOMENTUM_SKIP = os.getenv("MOMENTUM_SKIP", "BTC/EUR,ETH/EUR,ADA/EUR").split(",")
 
     # Scanner
-    SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 30))
-    AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 5))
+    SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 50))
+    AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 10))
 
     # Grid
     GRID_LEVELS = int(os.getenv("GRID_LEVELS", 10))

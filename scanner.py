@@ -7,8 +7,7 @@ from config import Config
 class CoinScanner:
     """Scans all available coins and picks the best opportunities."""
 
-    # Coins to always include (blue chips + high volatility)
-    CORE_COINS = ["BTC/EUR", "ETH/EUR", "SOL/EUR"]
+    CORE_COINS = []  # keine erzwungenen Core-Coins — Scanner entscheidet nach Score
 
     # High volatility altcoins — prioritize these for 5%+ daily moves
     VOLATILE_COINS = [

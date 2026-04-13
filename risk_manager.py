@@ -105,9 +105,9 @@ class RiskManager:
         return round(position_value / price, 8) if price > 0 else 0
 
     MAX_DCA_POSITIONS = 3
-    MAX_SHORT_POSITIONS = 3
+    MAX_SHORT_POSITIONS = 6  # bis zu 50% Shorts erlaubt
 
-def get_weakest_position(self, exchange) -> str | None:
+    def get_weakest_position(self, exchange) -> str | None:
         """Return the symbol of the worst-performing open position (for rotation)."""
         worst_sym = None
         worst_pnl = float("inf")
