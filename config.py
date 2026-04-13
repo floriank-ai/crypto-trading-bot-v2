@@ -21,7 +21,6 @@ class Config:
     STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.06))
     TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.18))
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
-    MIN_CASH_RESERVE_PCT = float(os.getenv("MIN_CASH_RESERVE_PCT", 0.15))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 

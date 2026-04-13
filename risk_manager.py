@@ -107,12 +107,7 @@ class RiskManager:
     MAX_DCA_POSITIONS = 3
     MAX_SHORT_POSITIONS = 3
 
-    def has_enough_cash(self, balance: float) -> bool:
-        """Check if cash is above the minimum reserve threshold."""
-        reserve = Config.INITIAL_CAPITAL * Config.MIN_CASH_RESERVE_PCT
-        return balance >= reserve
-
-    def get_weakest_position(self, exchange) -> str | None:
+def get_weakest_position(self, exchange) -> str | None:
         """Return the symbol of the worst-performing open position (for rotation)."""
         worst_sym = None
         worst_pnl = float("inf")
