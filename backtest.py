@@ -20,6 +20,7 @@ import time
 from datetime import datetime, timedelta
 from config import Config
 from strategies import MomentumStrategy, Signal
+import ta as ta_lib
 
 # ── Konfiguration ──────────────────────────────────────────────────────────
 SYMBOLS = [
@@ -98,8 +99,75 @@ def fetch_data_binance(symbol, months=3):
 
 # ── Backtest-Engine ────────────────────────────────────────────────────────
 
-def run_backtest(df, symbol, time_limit_candles=None):
-    strategy = MomentumStrategy()
+class StrictMomentumStrategy:
+    """Nur die stärksten Signale: Breakout/Breakdown + RSI-Extremwerte + ADX-Filter."""
+
+    def analyze(self, df: pd.DataFrame) -> dict:
+        if df.empty or len(df) < 30:
+            return {"signal": Signal.HOLD, "reason": "Not enough data"}
+
+        close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
+
+        rsi = ta_lib.momentum.RSIIndicator(close, window=14).rsi()
+        current_rsi = rsi.iloc[-1]
+
+        ema_f = ta_lib.trend.EMAIndicator(close, window=9).ema_indicator()
+        ema_s = ta_lib.trend.EMAIndicator(close, window=21).ema_indicator()
+        bullish = ema_f.iloc[-1] > ema_s.iloc[-1]
+        bearish = ema_f.iloc[-1] < ema_s.iloc[-1]
+
+        macd = ta_lib.trend.MACD(close)
+        macd_hist = macd.macd_diff().iloc[-1]
+
+        # ADX: nur bei echtem Trend handeln (ADX > 20)
+        adx = ta_lib.trend.ADXIndicator(high, low, close, window=14).adx()
+        trending = adx.iloc[-1] > 20
+
+        avg_vol = df["volume"].rolling(20).mean().iloc[-1]
+        vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.8
+
+        high_20 = close.rolling(20).max().iloc[-2] if len(df) >= 21 else 0
+        low_20  = close.rolling(20).min().iloc[-2] if len(df) >= 21 else 999999
+        breakout  = close.iloc[-1] > high_20 and vol_spike
+        breakdown = close.iloc[-1] < low_20  and vol_spike
+
+        signal = Signal.HOLD
+        reasons = []
+        leverage = 1
+
+        # NUR starke Signale mit ADX-Bestätigung
+        if trending:
+            if breakout and bullish:
+                signal = Signal.BUY
+                reasons = ["Breakout new high + volume spike"]
+                leverage = 2
+            elif current_rsi < 32 and bullish and macd_hist > 0:
+                signal = Signal.BUY
+                reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
+                leverage = 2
+            elif breakdown and bearish:
+                signal = Signal.SELL
+                reasons = ["Breakdown new low + volume spike"]
+                leverage = 2
+            elif current_rsi > 68 and bearish and macd_hist < 0:
+                signal = Signal.SELL
+                reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
+                leverage = 2
+
+        return {
+            "signal": signal,
+            "reason": " + ".join(reasons) if reasons else "No signal",
+            "rsi": round(current_rsi, 2),
+            "price": round(close.iloc[-1], 2),
+            "strategy": "momentum",
+            "leverage": leverage,
+        }
+
+
+def run_backtest(df, symbol, time_limit_candles=None, btc_df=None, direction="both", strict=False):
+    strategy = StrictMomentumStrategy() if strict else MomentumStrategy()
     balance = INITIAL_CAPITAL
     position = None
     trades = []
@@ -137,11 +205,24 @@ def run_backtest(df, symbol, time_limit_candles=None):
                 })
                 position = None
 
+        # ── BTC Trendfilter (24h = 96 Kerzen) ────────────────────────────
+        btc_bullish = btc_bearish = False
+        if btc_df is not None and i < len(btc_df):
+            btc_now = btc_df["close"].iloc[min(i, len(btc_df)-1)]
+            btc_24h = btc_df["close"].iloc[max(0, min(i, len(btc_df)-1) - 96)]
+            btc_change = (btc_now - btc_24h) / btc_24h
+            btc_bullish = btc_change > 0.005   # +0.5% über 24h
+            btc_bearish = btc_change < -0.005  # -0.5% über 24h
+
         # ── Einstieg prüfen (nur wenn keine offene Position) ─────────────
         if position is None and balance > 10:
             sig = strategy.analyze(window)
 
             if sig["signal"] == Signal.BUY:
+                if direction == "short":
+                    pass  # nur Shorts erlaubt
+                elif btc_df is not None and btc_bearish:
+                    pass  # kein Long bei BTC-Abwärtstrend
                 pos_value = balance * POSITION_SIZE_PCT
                 fee = pos_value * FEE_PCT
                 volume = pos_value / price
@@ -154,17 +235,22 @@ def run_backtest(df, symbol, time_limit_candles=None):
                 }
 
             elif sig["signal"] == Signal.SELL:
-                pos_value = balance * POSITION_SIZE_PCT
-                margin = pos_value * 0.20
-                fee = pos_value * FEE_PCT
-                volume = pos_value / price
-                balance -= margin + fee
-                position = {
-                    "entry": price, "volume": volume, "direction": "short",
-                    "sl": price * (1 + STOP_LOSS_PCT),
-                    "tp": price * (1 - TAKE_PROFIT_PCT),
-                    "margin": margin, "entry_candle": i,
-                }
+                if direction == "long":
+                    pass  # nur Longs erlaubt
+                elif btc_df is not None and btc_bullish:
+                    pass  # kein Short bei BTC-Aufwärtstrend
+                else:
+                    pos_value = balance * POSITION_SIZE_PCT
+                    margin = pos_value * 0.20
+                    fee = pos_value * FEE_PCT
+                    volume = pos_value / price
+                    balance -= margin + fee
+                    position = {
+                        "entry": price, "volume": volume, "direction": "short",
+                        "sl": price * (1 + STOP_LOSS_PCT),
+                        "tp": price * (1 - TAKE_PROFIT_PCT),
+                        "margin": margin, "entry_candle": i,
+                    }
 
         # ── Portfolio-Wert tracken ────────────────────────────────────────
         if position:
@@ -266,6 +352,12 @@ def main():
                         help="Take-Profit in Prozent ueberschreiben z.B. 12 fuer 12 Prozent")
     parser.add_argument("--time-limit", type=int, default=None,
                         help="Zeitlimit in Stunden fuer Positionen (z.B. 4)")
+    parser.add_argument("--btc-filter", action="store_true",
+                        help="24h BTC Trendfilter: nur Longs bei bullish, nur Shorts bei bearish")
+    parser.add_argument("--direction", choices=["long", "short", "both"], default="both",
+                        help="Nur Long, nur Short, oder beide Richtungen testen")
+    parser.add_argument("--strict", action="store_true",
+                        help="Strenge Strategie: nur starke Signale mit ADX-Filter")
     args = parser.parse_args()
 
     global TAKE_PROFIT_PCT
@@ -285,6 +377,13 @@ def main():
         exchange = ccxt.kraken({"enableRateLimit": True})
         exchange.load_markets()
 
+    # BTC-Daten für Trendfilter laden
+    btc_df = None
+    if args.btc_filter and args.source == "binance":
+        print("\n  Lade BTC/USDT für Trendfilter...", end=" ", flush=True)
+        btc_df = fetch_data_binance("BTC/EUR", months=args.months)
+        print(f"{len(btc_df)} Kerzen")
+
     results = []
     for symbol in SYMBOLS:
         print(f"\n  Lade {symbol}...", end=" ", flush=True)
@@ -300,8 +399,8 @@ def main():
 
         period = f"{df['time'].iloc[0].strftime('%d.%m.%y %H:%M')} → {df['time'].iloc[-1].strftime('%d.%m.%y %H:%M')}"
         print(f"{len(df)} Kerzen  [{period}]")
-        time_limit_candles = args.time_limit * 4 if args.time_limit else None  # Stunden → 15min-Kerzen
-        result = run_backtest(df, symbol, time_limit_candles=time_limit_candles)
+        time_limit_candles = args.time_limit * 4 if args.time_limit else None
+        result = run_backtest(df, symbol, time_limit_candles=time_limit_candles, btc_df=btc_df, direction=args.direction, strict=args.strict)
         results.append(result)
 
     print_results(results)

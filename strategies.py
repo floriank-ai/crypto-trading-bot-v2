@@ -11,105 +11,67 @@ class Signal:
 
 
 class MomentumStrategy:
-    """RSI + EMA crossover with aggressive thresholds."""
+    """Strict momentum: only high-conviction signals with ADX trend filter."""
 
     def analyze(self, df: pd.DataFrame) -> dict:
-        if df.empty or len(df) < Config.EMA_SLOW + 5:
+        if df.empty or len(df) < 30:
             return {"signal": Signal.HOLD, "reason": "Not enough data"}
 
         close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
 
         rsi = ta.momentum.RSIIndicator(close, window=Config.RSI_PERIOD).rsi()
         current_rsi = rsi.iloc[-1]
 
         ema_f = ta.trend.EMAIndicator(close, window=Config.EMA_FAST).ema_indicator()
         ema_s = ta.trend.EMAIndicator(close, window=Config.EMA_SLOW).ema_indicator()
-
         bullish = ema_f.iloc[-1] > ema_s.iloc[-1]
         bearish = ema_f.iloc[-1] < ema_s.iloc[-1]
-        cross_up = ema_f.iloc[-2] <= ema_s.iloc[-2] and ema_f.iloc[-1] > ema_s.iloc[-1]
-        cross_down = ema_f.iloc[-2] >= ema_s.iloc[-2] and ema_f.iloc[-1] < ema_s.iloc[-1]
 
-        # MACD for extra confirmation
         macd = ta.trend.MACD(close)
         macd_hist = macd.macd_diff().iloc[-1]
 
-        # Volume spike detection
+        # ADX: nur bei echtem Trend handeln (> 20)
+        adx = ta.trend.ADXIndicator(high, low, close, window=14).adx()
+        trending = adx.iloc[-1] > 20
+
         avg_vol = df["volume"].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0
-        current_vol = df["volume"].iloc[-1]
-        vol_spike = avg_vol > 0 and current_vol > avg_vol * 1.8
+        vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.8
 
-        # Breakout: new 20-period high with volume
-        high_20 = df["close"].rolling(20).max().iloc[-2] if len(df) >= 20 else 0
-        breakout = close.iloc[-1] > high_20 and vol_spike
-
-        # Breakdown: new 20-period low with volume
-        low_20 = df["close"].rolling(20).min().iloc[-2] if len(df) >= 20 else 999999
-        breakdown = close.iloc[-1] < low_20 and vol_spike
+        high_20 = close.rolling(20).max().iloc[-2] if len(df) >= 21 else 0
+        low_20  = close.rolling(20).min().iloc[-2] if len(df) >= 21 else 999999
+        breakout  = close.iloc[-1] > high_20 and vol_spike
+        breakdown = close.iloc[-1] < low_20  and vol_spike
 
         signal = Signal.HOLD
         reasons = []
-
-        # Signalstärke bestimmt Hebel
-        # 3 Bedingungen erfüllt = starkes Signal → 2x Hebel
-        # 2 Bedingungen       = normales Signal → 1x
         leverage = 1
 
-        # Breakout buy (stärkstes Signal → 2x Hebel)
-        if breakout and bullish:
-            signal = Signal.BUY
-            reasons = ["Breakout new high", "volume spike"]
-            leverage = 2
+        if trending:
+            # Long: Breakout neues Hoch + Volumen
+            if breakout and bullish:
+                signal = Signal.BUY
+                reasons = ["Breakout new high + volume spike"]
+                leverage = 2
 
-        # RSI oversold + bullish + MACD → 2x Hebel
-        elif current_rsi < Config.RSI_OVERSOLD and bullish and macd_hist > 0:
-            signal = Signal.BUY
-            reasons = [f"RSI {current_rsi:.0f} oversold", "EMA bullish", "MACD pos"]
-            leverage = 2
+            # Long: RSI extrem oversold + EMA bullish + MACD positiv
+            elif current_rsi < 32 and bullish and macd_hist > 0:
+                signal = Signal.BUY
+                reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
+                leverage = 2
 
-        # RSI oversold + bullish (kein MACD) → 1x
-        elif current_rsi < Config.RSI_OVERSOLD and bullish:
-            signal = Signal.BUY
-            reasons = [f"RSI {current_rsi:.0f} oversold", "EMA bullish"]
-            leverage = 1
+            # Short: Breakdown neues Tief + Volumen
+            elif breakdown and bearish:
+                signal = Signal.SELL
+                reasons = ["Breakdown new low + volume spike"]
+                leverage = 2
 
-        # EMA cross up + MACD positiv → 1.5x (abgerundet auf 1 für Sicherheit)
-        elif cross_up and macd_hist > 0:
-            signal = Signal.BUY
-            reasons = ["EMA cross up", "MACD pos"]
-            leverage = 1
-
-        # EMA cross up ohne MACD → 1x
-        elif cross_up:
-            signal = Signal.BUY
-            reasons = ["EMA cross up", f"MACD {'pos' if macd_hist > 0 else 'neg'}"]
-            leverage = 1
-
-        # RSI low + bullish (relaxed) → 1x
-        elif current_rsi < 45 and bullish and macd_hist > 0:
-            signal = Signal.BUY
-            reasons = [f"RSI {current_rsi:.0f} low", "EMA bullish", "MACD pos"]
-            leverage = 1
-
-        # Short: Breakdown — neues 20-Perioden-Tief + Volumen-Spike → 2x Short
-        elif breakdown and bearish:
-            signal = Signal.SELL
-            reasons = ["Breakdown new low", "volume spike"]
-            leverage = 2
-
-        # Short: RSI überkauft + bearish + MACD negativ → 2x Short
-        elif current_rsi > Config.RSI_OVERBOUGHT and bearish and macd_hist < 0:
-            signal = Signal.SELL
-            reasons = [f"RSI {current_rsi:.0f} overbought", "EMA bearish", "MACD neg"]
-            leverage = 2
-
-        # Short: EMA cross down + MACD negativ + bearish → 1x Short
-        elif cross_down and macd_hist < 0 and bearish:
-            signal = Signal.SELL
-            reasons = ["EMA cross down", "MACD neg", "bearish"]
-            leverage = 1
-
-        # Kein Short bei niedrigem RSI — Coin bereits überverkauft, Bounce wahrscheinlich
+            # Short: RSI extrem overbought + EMA bearish + MACD negativ
+            elif current_rsi > 68 and bearish and macd_hist < 0:
+                signal = Signal.SELL
+                reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
+                leverage = 2
 
         return {
             "signal": signal,
@@ -118,7 +80,6 @@ class MomentumStrategy:
             "price": round(close.iloc[-1], 2),
             "strategy": "momentum",
             "leverage": leverage,
-            "short": signal == Signal.SELL and not any(p == "momentum" for p in []),
         }
 
 

@@ -58,26 +58,30 @@ class RiskManager:
 
         if direction == "long":
             pnl_pct = (current_price - entry) / entry
-            if pnl_pct >= 0.09:
-                # Ab +9%: SL 3% unter aktuellem Preis nachziehen
-                new_sl = current_price * (1 - 0.03)
+            if pnl_pct >= 0.14:
+                # Ab +14%: SL 4% unter aktuellem Preis nachziehen
+                new_sl = current_price * (1 - 0.04)
                 if new_sl > pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
-            elif pnl_pct >= 0.06:
-                # Ab +6%: SL auf Break-Even (Einstiegspreis)
+                    self._save_positions()
+            elif pnl_pct >= 0.09:
+                # Ab +9%: SL auf Break-Even
                 new_sl = entry * 1.001
                 if new_sl > pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
+                    self._save_positions()
         else:  # short
             pnl_pct = (entry - current_price) / entry
-            if pnl_pct >= 0.09:
-                new_sl = current_price * (1 + 0.03)
+            if pnl_pct >= 0.14:
+                new_sl = current_price * (1 + 0.04)
                 if new_sl < pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
-            elif pnl_pct >= 0.06:
+                    self._save_positions()
+            elif pnl_pct >= 0.09:
                 new_sl = entry * 0.999
                 if new_sl < pos["stop_loss"]:
                     pos["stop_loss"] = new_sl
+                    self._save_positions()
 
     def calculate_position_size(self, balance: float, price: float, strategy: str = "momentum",
                                  dca_multiplier: float = 1.0, leverage: int = 1) -> float:
