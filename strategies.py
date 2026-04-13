@@ -44,31 +44,42 @@ class MomentumStrategy:
         breakout  = close.iloc[-1] > high_20 and vol_spike
         breakdown = close.iloc[-1] < low_20  and vol_spike
 
+        # Bollinger Bands: filter overdehnte Einstiege
+        bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+        bb_upper  = bb.bollinger_hband().iloc[-1]
+        bb_middle = bb.bollinger_mavg().iloc[-1]
+        bb_lower  = bb.bollinger_lband().iloc[-1]
+        price_now = close.iloc[-1]
+
         signal = Signal.HOLD
         reasons = []
         leverage = 1
 
         if trending:
             # Long: Breakout neues Hoch + Volumen
-            if breakout and bullish:
+            # Blockieren wenn >2% über oberem BB (überdehnt, False-Breakout-Risiko)
+            if breakout and bullish and price_now <= bb_upper * 1.02:
                 signal = Signal.BUY
                 reasons = ["Breakout new high + volume spike"]
                 leverage = 2
 
             # Long: RSI extrem oversold + EMA bullish + MACD positiv
-            elif current_rsi < 32 and bullish and macd_hist > 0:
+            # Nur kaufen wenn Preis noch unter/am BB-Mittelpunkt (wirklich günstig)
+            elif current_rsi < 32 and bullish and macd_hist > 0 and price_now <= bb_middle:
                 signal = Signal.BUY
                 reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
                 leverage = 2
 
             # Short: Breakdown neues Tief + Volumen
-            elif breakdown and bearish:
+            # Blockieren wenn >2% unter unterem BB (überdehnt, Bounce-Risiko)
+            elif breakdown and bearish and price_now >= bb_lower * 0.98:
                 signal = Signal.SELL
                 reasons = ["Breakdown new low + volume spike"]
                 leverage = 2
 
             # Short: RSI extrem overbought + EMA bearish + MACD negativ
-            elif current_rsi > 68 and bearish and macd_hist < 0:
+            # Nur shorten wenn Preis noch über/am BB-Mittelpunkt
+            elif current_rsi > 68 and bearish and macd_hist < 0 and price_now >= bb_middle:
                 signal = Signal.SELL
                 reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
                 leverage = 2

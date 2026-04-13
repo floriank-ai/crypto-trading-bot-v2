@@ -166,8 +166,104 @@ class StrictMomentumStrategy:
         }
 
 
-def run_backtest(df, symbol, time_limit_candles=None, btc_df=None, direction="both", strict=False):
-    strategy = StrictMomentumStrategy() if strict else MomentumStrategy()
+class BBMomentumStrategy:
+    """Strict strategy + Bollinger Band filter to avoid entering overdehnte moves."""
+
+    def analyze(self, df: pd.DataFrame) -> dict:
+        if df.empty or len(df) < 30:
+            return {"signal": Signal.HOLD, "reason": "Not enough data"}
+
+        close = df["close"]
+        high  = df["high"]
+        low   = df["low"]
+
+        rsi = ta_lib.momentum.RSIIndicator(close, window=14).rsi()
+        current_rsi = rsi.iloc[-1]
+
+        ema_f = ta_lib.trend.EMAIndicator(close, window=9).ema_indicator()
+        ema_s = ta_lib.trend.EMAIndicator(close, window=21).ema_indicator()
+        bullish = ema_f.iloc[-1] > ema_s.iloc[-1]
+        bearish = ema_f.iloc[-1] < ema_s.iloc[-1]
+
+        macd = ta_lib.trend.MACD(close)
+        macd_hist = macd.macd_diff().iloc[-1]
+
+        adx = ta_lib.trend.ADXIndicator(high, low, close, window=14).adx()
+        trending = adx.iloc[-1] > 20
+
+        avg_vol = df["volume"].rolling(20).mean().iloc[-1]
+        vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.8
+
+        high_20 = close.rolling(20).max().iloc[-2] if len(df) >= 21 else 0
+        low_20  = close.rolling(20).min().iloc[-2] if len(df) >= 21 else 999999
+        breakout  = close.iloc[-1] > high_20 and vol_spike
+        breakdown = close.iloc[-1] < low_20  and vol_spike
+
+        # Bollinger Bands (20-period, 2 std)
+        bb = ta_lib.volatility.BollingerBands(close, window=20, window_dev=2)
+        bb_upper  = bb.bollinger_hband().iloc[-1]
+        bb_middle = bb.bollinger_mavg().iloc[-1]
+        bb_lower  = bb.bollinger_lband().iloc[-1]
+        price_now = close.iloc[-1]
+
+        signal = Signal.HOLD
+        reasons = []
+        leverage = 1
+
+        if trending:
+            if breakout and bullish:
+                # Block if price is already >2% above upper BB (too stretched)
+                if price_now > bb_upper * 1.02:
+                    pass  # overdehnt — false breakout risk
+                else:
+                    signal = Signal.BUY
+                    reasons = ["Breakout new high + volume spike"]
+                    leverage = 2
+
+            elif current_rsi < 32 and bullish and macd_hist > 0:
+                # RSI oversold: confirm price is near/below middle BB (actually cheap)
+                if price_now > bb_middle:
+                    pass  # RSI oversold but price still above midline — skip
+                else:
+                    signal = Signal.BUY
+                    reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
+                    leverage = 2
+
+            elif breakdown and bearish:
+                # Block if price already >2% below lower BB (too stretched, bounce risk)
+                if price_now < bb_lower * 0.98:
+                    pass  # overdehnt nach unten
+                else:
+                    signal = Signal.SELL
+                    reasons = ["Breakdown new low + volume spike"]
+                    leverage = 2
+
+            elif current_rsi > 68 and bearish and macd_hist < 0:
+                # RSI overbought: confirm price is near/above middle BB
+                if price_now < bb_middle:
+                    pass  # RSI overbought but price already below midline — skip
+                else:
+                    signal = Signal.SELL
+                    reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
+                    leverage = 2
+
+        return {
+            "signal": signal,
+            "reason": " + ".join(reasons) if reasons else "No signal",
+            "rsi": round(current_rsi, 2),
+            "price": round(price_now, 2),
+            "strategy": "momentum",
+            "leverage": leverage,
+        }
+
+
+def run_backtest(df, symbol, time_limit_candles=None, btc_df=None, direction="both", strict=False, bb_filter=False):
+    if bb_filter:
+        strategy = BBMomentumStrategy()
+    elif strict:
+        strategy = StrictMomentumStrategy()
+    else:
+        strategy = MomentumStrategy()
     balance = INITIAL_CAPITAL
     position = None
     trades = []
@@ -358,6 +454,8 @@ def main():
                         help="Nur Long, nur Short, oder beide Richtungen testen")
     parser.add_argument("--strict", action="store_true",
                         help="Strenge Strategie: nur starke Signale mit ADX-Filter")
+    parser.add_argument("--bb-filter", action="store_true",
+                        help="Bollinger Band Filter: blockiert overdehnte Einstiege")
     args = parser.parse_args()
 
     global TAKE_PROFIT_PCT
@@ -400,7 +498,7 @@ def main():
         period = f"{df['time'].iloc[0].strftime('%d.%m.%y %H:%M')} → {df['time'].iloc[-1].strftime('%d.%m.%y %H:%M')}"
         print(f"{len(df)} Kerzen  [{period}]")
         time_limit_candles = args.time_limit * 4 if args.time_limit else None
-        result = run_backtest(df, symbol, time_limit_candles=time_limit_candles, btc_df=btc_df, direction=args.direction, strict=args.strict)
+        result = run_backtest(df, symbol, time_limit_candles=time_limit_candles, btc_df=btc_df, direction=args.direction, strict=args.strict, bb_filter=args.bb_filter)
         results.append(result)
 
     print_results(results)
