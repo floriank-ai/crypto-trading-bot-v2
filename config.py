@@ -26,7 +26,7 @@ class Config:
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
     # Strategies
-    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,grid,dca,sentiment").split(",")
+    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,grid,sentiment").split(",")
 
     # Momentum: Diese Coins werden für Momentum-Trades gemieden (Backtest: schlechte Performance)
     MOMENTUM_SKIP = os.getenv("MOMENTUM_SKIP", "BTC/EUR,ETH/EUR,ADA/EUR").split(",")

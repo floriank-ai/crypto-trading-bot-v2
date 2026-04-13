@@ -98,7 +98,7 @@ def fetch_data_binance(symbol, months=3):
 
 # ── Backtest-Engine ────────────────────────────────────────────────────────
 
-def run_backtest(df, symbol):
+def run_backtest(df, symbol, time_limit_candles=None):
     strategy = MomentumStrategy()
     balance = INITIAL_CAPITAL
     position = None
@@ -117,9 +117,10 @@ def run_backtest(df, symbol):
                      (d == "short" and price >= position["sl"])
             hit_tp = (d == "long"  and price >= position["tp"]) or \
                      (d == "short" and price <= position["tp"])
+            hit_time = time_limit_candles and (i - position["entry_candle"]) >= time_limit_candles
 
-            if hit_sl or hit_tp:
-                exit_type = "stop_loss" if hit_sl else "take_profit"
+            if hit_sl or hit_tp or hit_time:
+                exit_type = "stop_loss" if hit_sl else ("take_profit" if hit_tp else "time_exit")
                 fee = price * position["volume"] * FEE_PCT
 
                 if d == "long":
@@ -149,7 +150,7 @@ def run_backtest(df, symbol):
                     "entry": price, "volume": volume, "direction": "long",
                     "sl": price * (1 - STOP_LOSS_PCT),
                     "tp": price * (1 + TAKE_PROFIT_PCT),
-                    "margin": pos_value,
+                    "margin": pos_value, "entry_candle": i,
                 }
 
             elif sig["signal"] == Signal.SELL:
@@ -162,7 +163,7 @@ def run_backtest(df, symbol):
                     "entry": price, "volume": volume, "direction": "short",
                     "sl": price * (1 + STOP_LOSS_PCT),
                     "tp": price * (1 - TAKE_PROFIT_PCT),
-                    "margin": margin,
+                    "margin": margin, "entry_candle": i,
                 }
 
         # ── Portfolio-Wert tracken ────────────────────────────────────────
@@ -263,6 +264,8 @@ def main():
                         help="Monate historische Daten bei Binance (default: 3)")
     parser.add_argument("--tp", type=float, default=None,
                         help="Take-Profit in Prozent ueberschreiben z.B. 12 fuer 12 Prozent")
+    parser.add_argument("--time-limit", type=int, default=None,
+                        help="Zeitlimit in Stunden fuer Positionen (z.B. 4)")
     args = parser.parse_args()
 
     global TAKE_PROFIT_PCT
@@ -297,7 +300,8 @@ def main():
 
         period = f"{df['time'].iloc[0].strftime('%d.%m.%y %H:%M')} → {df['time'].iloc[-1].strftime('%d.%m.%y %H:%M')}"
         print(f"{len(df)} Kerzen  [{period}]")
-        result = run_backtest(df, symbol)
+        time_limit_candles = args.time_limit * 4 if args.time_limit else None  # Stunden → 15min-Kerzen
+        result = run_backtest(df, symbol, time_limit_candles=time_limit_candles)
         results.append(result)
 
     print_results(results)
