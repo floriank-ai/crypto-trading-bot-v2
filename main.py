@@ -112,7 +112,6 @@ def check_exits(exchange, risk_manager, logger, notifier):
             continue
 
         current_price = ticker["last"]
-        risk_manager.update_trailing_stop(symbol, current_price)
         exit_type = risk_manager.check_exit(symbol, current_price)
 
         if exit_type:
@@ -138,7 +137,8 @@ def check_exits(exchange, risk_manager, logger, notifier):
                                  price=close_price, cost=cost, fee=fee,
                                  mode=Config.TRADING_MODE, strategy=pos["strategy"],
                                  signal_reason=exit_type,
-                                 balance_after=exchange.get_balance())
+                                 balance_after=exchange.get_balance(),
+                                 realized_pnl=pnl)
                 port_val = risk_manager.get_portfolio_value(exchange)
                 d_pnl = risk_manager.get_daily_pnl_pct(exchange)
                 notifier.notify_exit(symbol, exit_type, pnl, pos["strategy"], port_val, d_pnl)
@@ -419,9 +419,10 @@ def run_bot():
                     direction = best.get("direction", "long")
                     side = "sell" if direction == "short" else "buy"
 
-                    # Rotation: if strong signal (leverage>=2) but slots full or barely any cash, close weakest
+                    # Rotation: if strong signal (leverage>=2 OR scanner score>=10) but slots full or barely any cash
                     weakest = None
-                    is_strong = best.get("leverage", 1) >= Config.ROTATION_MIN_LEVERAGE
+                    coin_score = next((r["score"] for r in scan_results if r["symbol"] == symbol), 0)
+                    is_strong = best.get("leverage", 1) >= Config.ROTATION_MIN_LEVERAGE or coin_score >= 10
                     no_slots = len(risk_mgr.open_positions) >= risk_mgr.max_positions
                     low_cash = balance < 20  # only rotate if barely any cash left
                     if is_strong and (no_slots or low_cash):

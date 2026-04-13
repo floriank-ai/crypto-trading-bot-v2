@@ -39,7 +39,8 @@ class TradeLogger:
 
     def log_trade(self, pair: str, side: str, volume: float, price: float,
                   cost: float, fee: float, mode: str, strategy: str = "",
-                  signal_reason: str = "", balance_after: float = 0):
+                  signal_reason: str = "", balance_after: float = 0,
+                  realized_pnl: float = None):
         timestamp = datetime.now().isoformat()
         total = cost + fee if side == "buy" else cost - fee
 
@@ -58,6 +59,8 @@ class TradeLogger:
             "strategy": strategy, "signal_reason": signal_reason,
             "balance_after": balance_after,
         }
+        if realized_pnl is not None:
+            trade["realized_pnl"] = round(realized_pnl, 4)
 
         trades = []
         if os.path.exists(self.json_path):
@@ -86,9 +89,9 @@ class TradeLogger:
         if not trades:
             return {"total_trades": 0, "realized_pnl": 0, "total_fees_eur": 0, "strategies": {}}
 
-        # P&L: Einnahmen (sell/cover) minus Ausgaben (buy/short)
-        money_in  = sum(t["total_eur"] for t in trades if t["side"] in ("sell", "cover"))
-        money_out = sum(t["total_eur"] for t in trades if t["side"] in ("buy", "short"))
+        # Realized P&L: nur aus abgeschlossenen Trades (sell/cover mit realized_pnl-Feld)
+        closed = [t for t in trades if t["side"] in ("sell", "cover") and "realized_pnl" in t]
+        realized_pnl = sum(t["realized_pnl"] for t in closed)
         fees = sum(t["fee_eur"] for t in trades)
 
         strats = {}
@@ -101,6 +104,6 @@ class TradeLogger:
         return {
             "total_trades": len(trades),
             "total_fees_eur": round(fees, 4),
-            "realized_pnl": round(money_in - money_out, 2),
+            "realized_pnl": round(realized_pnl, 2),
             "strategies": strats,
         }
