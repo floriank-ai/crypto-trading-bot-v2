@@ -23,6 +23,14 @@ from notifier import Notifier
 
 
 
+def fmt_price(p: float) -> str:
+    """Format price with enough decimal places for cheap coins."""
+    if p >= 100:  return f"{p:.2f}"
+    if p >= 1:    return f"{p:.3f}"
+    if p >= 0.01: return f"{p:.4f}"
+    return f"{p:.6f}"
+
+
 def _restore_positions(risk_mgr, exchange):
     """Restore open positions from positions.json (written after every trade)."""
     import json, os
@@ -266,6 +274,33 @@ def run_bot():
     print(f"  [Restore] Tages-Startpunkt: {actual_portfolio:.2f}EUR")
 
     logger.log_session_start(actual_portfolio)
+
+    # Altlasten schließen: Positionen von Strategien die nicht mehr aktiv sind
+    active = Config.ACTIVE_STRATEGIES
+    always_keep = {"momentum", "sentiment", "gainer"}  # diese immer behalten
+    stale = [
+        sym for sym, pos in list(risk_mgr.open_positions.items())
+        if pos.get("strategy") not in always_keep and pos.get("strategy") not in active
+    ]
+    if stale:
+        print(f"\n  [Cleanup] Schliesse {len(stale)} Altlasten (inaktive Strategien): {stale}")
+        for sym in stale:
+            pos = risk_mgr.open_positions[sym]
+            res = exchange.place_order(sym, "sell", pos["volume"])
+            if res["status"] == "ok":
+                cp = res.get("price", pos["entry_price"])
+                cost = res.get("cost", pos["volume"] * cp)
+                fee = res.get("fee", cost * 0.0026)
+                pnl = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
+                logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
+                                 price=cp, cost=cost, fee=fee,
+                                 mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                 signal_reason="strategy_disabled",
+                                 balance_after=exchange.get_balance(), realized_pnl=pnl)
+                risk_mgr.close_position(sym)
+                print(f"    {sym} geschlossen: P&L {pnl:+.2f}EUR")
+        print(f"  [Cleanup] Fertig — Cash: {exchange.get_balance():.2f}EUR")
+
     recently_traded = {}  # symbol -> timestamp, Cooldown nach Rotation
 
     active = Config.ACTIVE_STRATEGIES
@@ -637,11 +672,11 @@ def run_bot():
                         unrealized = (p["entry_price"] - current) * p["volume"] if current else 0
                     else:
                         unrealized = (current - p["entry_price"]) * p["volume"] if current else 0
-                    print(f"    {s} [{direction.upper()}]: entry={p['entry_price']:.2f} "
-                          f"now={current:.2f} "
+                    print(f"    {s} [{direction.upper()}]: entry={fmt_price(p['entry_price'])} "
+                          f"now={fmt_price(current)} "
                           f"P&L={unrealized:+.2f}EUR "
                           f"[{p['strategy']}] "
-                          f"SL={p['stop_loss']:.2f} TP={p['take_profit']:.2f}")
+                          f"SL={fmt_price(p['stop_loss'])} TP={fmt_price(p['take_profit'])}")
 
             print(f"\n  Next scan in {Config.CHECK_INTERVAL}s...")
             time.sleep(Config.CHECK_INTERVAL)
