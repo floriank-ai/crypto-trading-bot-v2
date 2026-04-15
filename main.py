@@ -36,7 +36,13 @@ def _restore_positions(risk_mgr, exchange):
         if not positions:
             print("  [Restore] positions.json leer — keine offenen Positionen")
             return
+        # Nur Symbole wiederherstellen die auf Kraken (EUR-Pairs) verfügbar sind
+        valid_symbols = set(exchange.get_all_eur_pairs())
+        skipped = []
         for sym, pos in positions.items():
+            if sym not in valid_symbols:
+                skipped.append(sym)
+                continue
             risk_mgr.open_positions[sym] = pos
             direction = pos.get("direction", "long")
             if direction == "long":
@@ -50,7 +56,10 @@ def _restore_positions(risk_mgr, exchange):
                     "margin": pos.get("margin", pos["entry_price"] * pos["volume"] * 0.20),
                 }
             print(f"    {sym} [{direction.upper()}] vol={pos['volume']:.6f} @ {pos['entry_price']:.4f} SL={pos['stop_loss']:.4f}")
-        print(f"  [Restore] {len(positions)} Positionen (inkl. Trailing-SL) wiederhergestellt")
+        if skipped:
+            print(f"  [Restore] Übersprungen (nicht auf Kraken): {', '.join(skipped)}")
+            risk_mgr._save_positions()  # positions.json ohne ungültige Symbole überschreiben
+        print(f"  [Restore] {len(risk_mgr.open_positions)} Positionen wiederhergestellt")
     except Exception as e:
         print(f"  [Restore] Fehler: {e}")
         import traceback
