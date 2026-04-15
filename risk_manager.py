@@ -228,11 +228,7 @@ class RiskManager:
         """Calculate total portfolio value including open positions."""
         total = exchange.get_balance()
         for symbol, pos in self.open_positions.items():
-            # Gainer positions use Binance prices (USDT ≈ EUR for paper trading)
-            if pos.get("strategy") == "gainer":
-                ticker = exchange.get_binance_ticker(symbol)
-            else:
-                ticker = exchange.get_ticker(symbol)
+            ticker = exchange.get_ticker(symbol)
             if not ticker or not ticker.get("last"):
                 continue
             current_price = ticker["last"]
