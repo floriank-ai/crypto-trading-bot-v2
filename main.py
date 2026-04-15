@@ -15,7 +15,8 @@ from config import Config
 from auto_optimizer import should_run_today, run as run_optimizer, load_state
 from exchange import Exchange
 from scanner import CoinScanner
-from strategies import MomentumStrategy, GridStrategy, DCAStrategy, Signal
+from strategies import MomentumStrategy, GridStrategy, DCAStrategy, GainerStrategy, Signal
+from gainer_scanner import GainerScanner
 from sentiment import NewsSentimentAnalyzer
 from risk_manager import RiskManager
 from trade_logger import TradeLogger
@@ -103,11 +104,58 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
     return False
 
 
+def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analysis, portfolio_val=None):
+    """Execute a gainer trade on Binance (paper mode). Fixed EUR position size."""
+    price = analysis.get("price", 0)
+    if price <= 0:
+        print(f"    [Gainer] No price for {symbol}")
+        return False
+
+    if not risk_manager.can_open_position(symbol, "gainer", "long"):
+        print(f"    [Gainer] Slot already occupied")
+        return False
+
+    # Dynamic: always 10% of current portfolio value
+    port = portfolio_val if portfolio_val else risk_manager.get_portfolio_value(exchange)
+    amount_eur = port * Config.GAINER_SLOT_PCT
+    volume = round(amount_eur / price, 8)
+    print(f"    [Gainer] Size: {amount_eur:.2f}EUR ({Config.GAINER_SLOT_PCT*100:.0f}% of {port:.2f}EUR portfolio)")
+    result = exchange.place_gainer_paper_order(symbol, "buy", volume)
+
+    if result["status"] == "ok":
+        exec_price = result["price"]
+        cost = result["cost"]
+        fee = result["fee"]
+        risk_manager.open_position(symbol, exec_price, volume, "gainer", "long")
+        logger.log_trade(pair=symbol, side="buy", volume=volume,
+                         price=exec_price, cost=cost, fee=fee,
+                         mode=Config.TRADING_MODE, strategy="gainer",
+                         signal_reason=analysis["reason"],
+                         balance_after=exchange.get_balance())
+        port = portfolio_val if portfolio_val is not None else risk_manager.get_portfolio_value(exchange)
+        daily_pnl = risk_manager.get_daily_pnl_pct(exchange)
+        notifier.notify_trade("buy", symbol, volume, exec_price,
+                              analysis["reason"], "gainer",
+                              exchange.get_balance(), port, daily_pnl)
+        return True
+    else:
+        print(f"    [Gainer] Order failed: {result.get('error', '?')}")
+        return False
+
+
 def check_exits(exchange, risk_manager, logger, notifier):
     """Check all open positions for stop-loss / take-profit."""
     exits = []
     for symbol in list(risk_manager.open_positions.keys()):
-        ticker = exchange.get_ticker(symbol)
+        pos = risk_manager.open_positions[symbol]
+        is_gainer = pos.get("strategy") == "gainer"
+
+        # Gainer positions use Binance prices (USDT pairs)
+        if is_gainer:
+            ticker = exchange.get_binance_ticker(symbol)
+        else:
+            ticker = exchange.get_ticker(symbol)
+
         if not ticker or not ticker.get("last"):
             continue
 
@@ -115,16 +163,21 @@ def check_exits(exchange, risk_manager, logger, notifier):
         exit_type = risk_manager.check_exit(symbol, current_price)
 
         if exit_type:
-            pos = risk_manager.open_positions[symbol]
             direction = pos.get("direction", "long")
             print(f"  >> {exit_type.upper()} triggered: {symbol} [{direction}]")
 
-            close_side = "buy" if direction == "short" else "sell"
-            result = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
+            if is_gainer:
+                result = exchange.place_gainer_paper_order(symbol, "sell", pos["volume"])
+                fee_rate = 0.001
+            else:
+                close_side = "buy" if direction == "short" else "sell"
+                result = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
+                fee_rate = 0.0026
+
             if result["status"] == "ok":
                 close_price = result.get("price", current_price)
                 cost = result.get("cost", pos["volume"] * close_price)
-                fee = result.get("fee", cost * 0.0026)
+                fee = result.get("fee", cost * fee_rate)
 
                 if direction == "short":
                     pnl = (pos["entry_price"] - close_price) * pos["volume"] - 2 * fee
@@ -166,6 +219,8 @@ def run_bot():
     momentum = MomentumStrategy()
     grid = GridStrategy()
     dca = DCAStrategy()
+    gainer_strategy = GainerStrategy()
+    gainer_scanner = GainerScanner()
     sentiment = NewsSentimentAnalyzer()
     risk_mgr = RiskManager()
     logger = TradeLogger()
@@ -186,12 +241,19 @@ def run_bot():
                  f"🎯 Tages-P&L: `{pnl:+.2f}%`",
                  f"📂 Offene Positionen: {len(pos)}"]
         for sym, p in pos.items():
-            ticker = exchange.get_ticker(sym)
+            if p.get("strategy") == "gainer":
+                ticker = exchange.get_binance_ticker(sym)
+            else:
+                ticker = exchange.get_ticker(sym)
             cur = ticker.get("last", 0) if ticker else 0
             d = p.get("direction", "long")
             unreal = (cur - p["entry_price"]) * p["volume"] if d == "long" else (p["entry_price"] - cur) * p["volume"]
-            icon = "🟢" if unreal >= 0 else "🔴"
-            lines.append(f"  {icon} {sym} [{d.upper()}]: `{unreal:+.2f}EUR`")
+            if p.get("strategy") == "gainer":
+                icon = "🚀" if unreal >= 0 else "💥"
+                lines.append(f"  {icon} *{sym}* [BINANCE]: `{unreal:+.2f}EUR`")
+            else:
+                icon = "🟢" if unreal >= 0 else "🔴"
+                lines.append(f"  {icon} {sym} [{d.upper()}]: `{unreal:+.2f}EUR`")
         notifier.send("\n".join(lines))
     notifier.set_status_callback(send_status)
 
@@ -209,16 +271,20 @@ def run_bot():
     print(f"  Starting in 3 seconds...\n")
     time.sleep(3)
 
-    # Optimizer-State laden (Skip-Liste aus letztem Backtest)
+    # Optimizer-State laden (Prioritätsliste aus letztem Backtest)
     optimizer_state = load_state()
-    Config.MOMENTUM_SKIP = optimizer_state.get("skip_list", Config.MOMENTUM_SKIP)
-    print(f"  Momentum-Skip: {Config.MOMENTUM_SKIP}")
+    Config.MOMENTUM_PRIORITY = optimizer_state.get("priority_list", [])
+    if Config.MOMENTUM_PRIORITY:
+        print(f"  Momentum-Priorität: {len(Config.MOMENTUM_PRIORITY)} Coins — {Config.MOMENTUM_PRIORITY[:5]}...")
+    else:
+        print(f"  Momentum-Priorität: leer (Optimizer noch nicht gelaufen — alle Coins gleichwertig)")
 
     cycle = 0
     peak_portfolio = actual_portfolio
     hwm_pause_until = 0
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
+    last_gainer_scan = 0   # Timestamp des letzten Gainer-Scans
 
     while True:
         try:
@@ -236,13 +302,21 @@ def run_bot():
             if current_hour % 4 == 0 and current_hour != last_report_hour:
                 last_report_hour = current_hour
                 pos = risk_mgr.open_positions
-                best  = max(pos.items(), key=lambda x: (exchange.get_ticker(x[0]) or {}).get("last", x[1]["entry_price"]) * x[1]["volume"] - x[1]["entry_price"] * x[1]["volume"], default=(None, None))
-                worst = min(pos.items(), key=lambda x: (exchange.get_ticker(x[0]) or {}).get("last", x[1]["entry_price"]) * x[1]["volume"] - x[1]["entry_price"] * x[1]["volume"], default=(None, None))
-                best_pnl  = ((exchange.get_ticker(best[0])  or {}).get("last", best[1]["entry_price"])  - best[1]["entry_price"])  * best[1]["volume"]  if best[0]  else 0
-                worst_pnl = ((exchange.get_ticker(worst[0]) or {}).get("last", worst[1]["entry_price"]) - worst[1]["entry_price"]) * worst[1]["volume"] if worst[0] else 0
+                daily_pnl_now = risk_mgr.get_daily_pnl_pct(exchange)
+
+                def _pos_pnl(sym, p):
+                    t = exchange.get_binance_ticker(sym) if p.get("strategy") == "gainer" else exchange.get_ticker(sym)
+                    cur = (t or {}).get("last", p["entry_price"])
+                    d = p.get("direction", "long")
+                    return (cur - p["entry_price"]) * p["volume"] if d == "long" else (p["entry_price"] - cur) * p["volume"]
+
+                best  = max(pos.items(), key=lambda x: _pos_pnl(x[0], x[1]), default=(None, None))
+                worst = min(pos.items(), key=lambda x: _pos_pnl(x[0], x[1]), default=(None, None))
+                best_pnl  = _pos_pnl(best[0],  best[1])  if best[0]  else 0
+                worst_pnl = _pos_pnl(worst[0], worst[1]) if worst[0] else 0
                 notifier.send(
                     f"📊 *{datetime.now().strftime('%H:%M')} Uhr Update*\n"
-                    f"💰 Portfolio: `{portfolio_val:.2f}EUR` ({daily_pnl:+.2f}%)\n"
+                    f"💰 Portfolio: `{portfolio_val:.2f}EUR` ({daily_pnl_now:+.2f}%)\n"
                     f"💵 Cash: `{balance:.2f}EUR`\n"
                     f"📂 Positionen: {len(pos)}\n"
                     + (f"🏆 Bester: {best[0]} `{best_pnl:+.2f}EUR`\n" if best[0] else "")
@@ -251,9 +325,9 @@ def run_bot():
 
             # Wöchentlicher Auto-Optimizer (jeden Sonntag)
             if should_run_today():
-                new_skip = run_optimizer(notifier)
-                Config.MOMENTUM_SKIP = new_skip
-                print(f"  [Optimizer] Neue Skip-Liste aktiv: {new_skip}")
+                new_priority = run_optimizer(notifier)
+                Config.MOMENTUM_PRIORITY = new_priority
+                print(f"  [Optimizer] Neue Prioritätsliste: {new_priority[:5]}...")
 
             # Mitternacht-Reset
             if datetime.now().date() != today:
@@ -321,6 +395,69 @@ def run_bot():
                 trend_str = f"BTC {btc_change*100:+.2f}% → {'BULLISH' if market_bullish else 'BEARISH' if market_bearish else 'NEUTRAL'}"
                 print(f"  Markt: {trend_str}")
 
+            # Marktkontext-Exit: verlierend Shorts schließen wenn BTC dreht bullisch
+            # (verhindert dass z.B. BCH-Short weiter blutet wenn BTC plötzlich steigt)
+            if market_bullish:
+                for sym in list(risk_mgr.open_positions.keys()):
+                    pos = risk_mgr.open_positions[sym]
+                    if pos.get("direction") != "short":
+                        continue
+                    ticker = exchange.get_ticker(sym)
+                    if not ticker or not ticker.get("last"):
+                        continue
+                    cur = ticker["last"]
+                    pnl_pct = (pos["entry_price"] - cur) / pos["entry_price"]
+                    if pnl_pct < -0.02:  # Short ist >2% im Minus
+                        print(f"  [MarktExit] BTC bullisch + {sym} SHORT -{abs(pnl_pct)*100:.1f}% → schließen")
+                        res = exchange.place_order(sym, "buy", pos["volume"], direction="short")
+                        if res["status"] == "ok":
+                            cp = res.get("price", cur)
+                            cost = res.get("cost", pos["volume"] * cp)
+                            fee = res.get("fee", cost * 0.0026)
+                            pnl = (pos["entry_price"] - cp) * pos["volume"] - 2 * fee
+                            logger.log_trade(pair=sym, side="cover", volume=pos["volume"],
+                                             price=cp, cost=cost, fee=fee,
+                                             mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                             signal_reason="market_context_exit_bullish",
+                                             balance_after=exchange.get_balance(), realized_pnl=pnl)
+                            risk_mgr.close_position(sym)
+                            port_val = risk_mgr.get_portfolio_value(exchange)
+                            d_pnl = risk_mgr.get_daily_pnl_pct(exchange)
+                            notifier.notify_exit(sym, "market_context_exit", pnl, pos["strategy"], port_val, d_pnl)
+                            print(f"    Geschlossen: {sym} P&L {pnl:+.2f}EUR")
+
+            # Marktkontext-Exit: verlierend Longs schließen wenn BTC dreht bearisch
+            if market_bearish:
+                for sym in list(risk_mgr.open_positions.keys()):
+                    pos = risk_mgr.open_positions[sym]
+                    if pos.get("direction") != "long":
+                        continue
+                    if pos.get("strategy") in ("dca", "grid", "gainer"):
+                        continue  # DCA/Grid/Gainer haben eigene Logik
+                    ticker = exchange.get_ticker(sym)
+                    if not ticker or not ticker.get("last"):
+                        continue
+                    cur = ticker["last"]
+                    pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
+                    if pnl_pct < -0.02:  # Long ist >2% im Minus
+                        print(f"  [MarktExit] BTC bearisch + {sym} LONG -{abs(pnl_pct)*100:.1f}% → schließen")
+                        res = exchange.place_order(sym, "sell", pos["volume"])
+                        if res["status"] == "ok":
+                            cp = res.get("price", cur)
+                            cost = res.get("cost", pos["volume"] * cp)
+                            fee = res.get("fee", cost * 0.0026)
+                            pnl = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
+                            logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
+                                             price=cp, cost=cost, fee=fee,
+                                             mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                             signal_reason="market_context_exit_bearish",
+                                             balance_after=exchange.get_balance(), realized_pnl=pnl)
+                            risk_mgr.close_position(sym)
+                            port_val = risk_mgr.get_portfolio_value(exchange)
+                            d_pnl = risk_mgr.get_daily_pnl_pct(exchange)
+                            notifier.notify_exit(sym, "market_context_exit", pnl, pos["strategy"], port_val, d_pnl)
+                            print(f"    Geschlossen: {sym} P&L {pnl:+.2f}EUR")
+
             # Fix 3: Verlustbremse — bei -3% Tages-P&L keine neuen Longs
             loss_brake = daily_pnl < -3.0
             if loss_brake:
@@ -330,6 +467,44 @@ def run_bot():
             exits = check_exits(exchange, risk_mgr, logger, notifier)
             for sym, etype, pnl in exits:
                 print(f"    Exited {sym}: {etype} P&L {pnl:+.2f}EUR")
+
+            # 1b. Gainer slot: scan Binance top gainers every N minutes
+            gainer_interval_secs = Config.GAINER_SCAN_INTERVAL_MINUTES * 60
+            gainer_slot_occupied = any(
+                p.get("strategy") == "gainer" for p in risk_mgr.open_positions.values()
+            )
+            if not gainer_slot_occupied and time.time() - last_gainer_scan >= gainer_interval_secs:
+                last_gainer_scan = time.time()
+                print(f"\n  [Gainer Slot] Scanning Binance top gainers (min +{Config.GAINER_MIN_GAIN_24H:.0f}% 24h)...")
+                gainers = gainer_scanner.get_top_gainers(min_gain_pct=Config.GAINER_MIN_GAIN_24H)
+                if not gainers:
+                    print(f"  [Gainer Slot] No qualifying gainers found")
+                else:
+                    for g in gainers:
+                        sym = g["symbol"]
+                        if sym in risk_mgr.open_positions:
+                            continue
+                        print(f"  [Gainer] Analyzing {sym} +{g['gain_24h']}% (1h: {g['trend_1h']:+.1f}%)...")
+                        df = gainer_scanner.get_ohlcv(sym)
+                        sig = gainer_strategy.analyze(df, g["gain_24h"])
+                        if sig["signal"] == Signal.BUY:
+                            sig["price"] = g["price"]
+                            traded = execute_gainer_trade(
+                                exchange, risk_mgr, logger, notifier, sym, sig, portfolio_val
+                            )
+                            if traded:
+                                print(f"  [Gainer] ✓ Bought {sym} @ {g['price']:.6f} USDT | "
+                                      f"SL:-{Config.GAINER_SL_PCT*100:.0f}% TP:+{Config.GAINER_TP_PCT*100:.0f}%")
+                                break  # one slot only
+                        else:
+                            print(f"  [Gainer] {sym} rejected: {sig['reason']}")
+            elif gainer_slot_occupied:
+                gainer_pos = next(
+                    (f"{sym} [{p['entry_price']:.6f}]"
+                     for sym, p in risk_mgr.open_positions.items()
+                     if p.get("strategy") == "gainer"), ""
+                )
+                print(f"  [Gainer Slot] Active: {gainer_pos}")
 
             # Schutz-Phase: keine neuen Trades, bestehende Positionen laufen weiter
             if phase == "protect":
@@ -374,7 +549,7 @@ def run_bot():
                 signals = []
 
                 # Momentum (Long + Short) — BTC als Gewichtung + Verlustbremse
-                if "momentum" in active and symbol not in Config.MOMENTUM_SKIP:
+                if "momentum" in active:
                     sig = momentum.analyze(df)
                     strong = sig.get("leverage", 1) >= 2
                     if sig["signal"] == Signal.BUY:
@@ -464,7 +639,10 @@ def run_bot():
             if risk_mgr.open_positions:
                 print(f"\n  Open positions ({len(risk_mgr.open_positions)}):")
                 for s, p in risk_mgr.open_positions.items():
-                    ticker = exchange.get_ticker(s)
+                    if p.get("strategy") == "gainer":
+                        ticker = exchange.get_binance_ticker(s)
+                    else:
+                        ticker = exchange.get_ticker(s)
                     current = ticker.get("last", 0) if ticker else 0
                     direction = p.get("direction", "long")
                     if direction == "short":

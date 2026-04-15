@@ -1,10 +1,11 @@
 """
 Auto-Optimizer: Läuft jeden Sonntag, testet alle Coins mit der Momentum-Strategie
-gegen die letzten 3 Monate und aktualisiert die MOMENTUM_SKIP-Liste automatisch.
+gegen die letzten 3 Monate und erstellt eine Prioritätsliste der besten Coins.
 
 Logik:
-  - P&L < -10 EUR  → Coin wird zur Skip-Liste hinzugefügt
-  - P&L > +10 EUR  → Coin wird von der Skip-Liste entfernt
+  - Alle Kraken EUR-Coins werden backtested
+  - Top 20 nach P&L → Prioritätsliste (werden zuerst gescannt)
+  - Kein Ban mehr — alle Coins bleiben handelbar, Strategie-Filter entscheiden
   - Ergebnis wird per Telegram gesendet
   - Zustand wird in logs/optimizer_state.json gespeichert (Railway-persistent)
 """
@@ -21,8 +22,7 @@ from strategies import MomentumStrategy, Signal
 
 STATE_PATH = os.path.join("logs", "optimizer_state.json")
 
-SKIP_THRESHOLD  = -10.0   # EUR — schlechter als das → überspringen
-KEEP_THRESHOLD  =  10.0   # EUR — besser als das → wieder aufnehmen
+PRIORITY_COUNT  = 20      # Top N Coins in die Prioritätsliste
 MONTHS          = 3
 POSITION_PCT    = 0.20
 FEE_PCT         = 0.0026
@@ -64,7 +64,7 @@ def load_state() -> dict:
                 return json.load(f)
         except Exception:
             pass
-    return {"last_run": None, "skip_list": list(Config.MOMENTUM_SKIP)}
+    return {"last_run": None, "priority_list": []}
 
 
 def save_state(state: dict):
@@ -175,12 +175,11 @@ def _backtest_coin(df: pd.DataFrame) -> float:
 
 def run(notifier=None) -> list[str]:
     """
-    Führt den Backtest durch, aktualisiert die Skip-Liste und
-    gibt die neue Skip-Liste zurück. Schickt Telegram-Bericht.
+    Führt den Backtest durch, erstellt eine Prioritätsliste der besten Coins
+    und gibt diese zurück. Kein Ban — alle Coins bleiben handelbar.
     """
     print("\n  [Optimizer] Starte wöchentlichen Backtest aller Kraken-Coins...")
     state = load_state()
-    current_skip = set(state.get("skip_list", list(Config.MOMENTUM_SKIP)))
     results = {}
 
     symbols = get_testable_symbols()
@@ -200,48 +199,34 @@ def run(notifier=None) -> list[str]:
         print(f"{pnl:+.2f}EUR")
         time.sleep(0.15)
 
-    # Skip-Liste aktualisieren
-    added, removed = [], []
-    for sym, pnl in results.items():
-        if pnl < SKIP_THRESHOLD and sym not in current_skip:
-            current_skip.add(sym)
-            added.append(f"{sym} ({pnl:+.0f}EUR)")
-        elif pnl > KEEP_THRESHOLD and sym in current_skip:
-            current_skip.discard(sym)
-            removed.append(f"{sym} ({pnl:+.0f}EUR)")
-
-    new_skip = sorted(current_skip)
+    # Prioritätsliste: Top N Coins nach P&L (nur profitable)
+    ranked = sorted(results.items(), key=lambda x: x[1], reverse=True)
+    priority_list = [sym for sym, pnl in ranked[:PRIORITY_COUNT] if pnl > 0]
 
     # Zustand speichern
     state["last_run"] = datetime.now().isoformat()
-    state["skip_list"] = new_skip
+    state["priority_list"] = priority_list
     state["last_results"] = results
     save_state(state)
 
     # Ranking ausgeben
-    ranked = sorted(results.items(), key=lambda x: x[1], reverse=True)
     print("\n  [Optimizer] Ergebnisse (3 Monate):")
     for sym, pnl in ranked:
-        status = "⛔ SKIP" if sym in current_skip else "✅ AKTIV"
-        print(f"    {sym:15s} {pnl:+7.2f}EUR  {status}")
-    print(f"  [Optimizer] Skip-Liste: {new_skip}")
+        tag = "⭐ PRIO" if sym in priority_list else "   "
+        print(f"    {sym:15s} {pnl:+7.2f}EUR  {tag}")
+    print(f"  [Optimizer] Prioritätsliste ({len(priority_list)}): {priority_list}")
 
-    # Telegram-Bericht (nur Top 5, Bottom 5 und Änderungen)
+    # Telegram-Bericht
     if notifier:
         lines = [f"📊 *Wöchentlicher Backtest* ({len(results)} Coins, 3 Monate)\n"]
-        lines.append("🏆 *Top 5:*")
-        for sym, pnl in ranked[:5]:
-            lines.append(f"  ✅ {sym}: `{pnl:+.0f}EUR`")
+        lines.append(f"⭐ *Top {PRIORITY_COUNT} Priorität:*")
+        for sym in priority_list[:10]:
+            pnl = results.get(sym, 0)
+            lines.append(f"  {sym}: `{pnl:+.0f}EUR`")
         lines.append("\n💀 *Schlechteste 5:*")
         for sym, pnl in ranked[-5:]:
-            lines.append(f"  ⛔ {sym}: `{pnl:+.0f}EUR`")
-        if added:
-            lines.append(f"\n🆕 Neu Skip: {', '.join(added)}")
-        if removed:
-            lines.append(f"\n♻️ Wieder aktiv: {', '.join(removed)}")
-        if not added and not removed:
-            lines.append("\n_Keine Änderungen._")
-        lines.append(f"\nSkip-Liste: {len(new_skip)} Coins")
+            lines.append(f"  {sym}: `{pnl:+.0f}EUR`")
+        lines.append(f"\n_Kein Ban — alle Coins handelbar. {len(priority_list)} Coins bevorzugt._")
         notifier.send("\n".join(lines))
 
-    return new_skip
+    return priority_list

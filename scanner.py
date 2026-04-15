@@ -9,15 +9,6 @@ class CoinScanner:
 
     CORE_COINS = []  # keine erzwungenen Core-Coins — Scanner entscheidet nach Score
 
-    # High volatility altcoins — prioritize these for 5%+ daily moves
-    VOLATILE_COINS = [
-        "PEPE/EUR", "DOGE/EUR", "SHIB/EUR",   # Meme coins — extreme moves
-        "WIF/EUR", "BONK/EUR", "FLOKI/EUR",    # Newer memes
-        "AVAX/EUR", "MATIC/EUR", "LINK/EUR",   # Mid caps
-        "INJ/EUR", "TIA/EUR", "SEI/EUR",       # Trending L1s
-        "SUI/EUR", "APT/EUR", "ARB/EUR",       # New L1/L2
-    ]
-
     # Coins to skip (stablecoins, wrapped, low-liquidity, blacklist)
     SKIP_COINS = [
         "USDT/EUR", "USDC/EUR", "DAI/EUR", "PYUSD/EUR", "EURT/EUR",
@@ -35,10 +26,10 @@ class CoinScanner:
         all_pairs = self.exchange.get_all_eur_pairs()
         candidates = [p for p in all_pairs if p not in self.SKIP_COINS]
 
-        # Put volatile coins first so they always get scanned
-        volatile_available = [c for c in self.VOLATILE_COINS if c in candidates]
-        rest = [c for c in candidates if c not in volatile_available]
-        candidates = volatile_available + rest
+        # Prioritätsliste zuerst scannen (vom Optimizer data-driven befüllt)
+        priority = [c for c in Config.MOMENTUM_PRIORITY if c in candidates]
+        rest = [c for c in candidates if c not in set(priority)]
+        candidates = priority + rest
 
         # Get bulk tickers
         tickers = self.exchange.get_tickers_bulk(candidates[:Config.SCAN_TOP_N])

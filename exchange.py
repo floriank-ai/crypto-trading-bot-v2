@@ -129,6 +129,61 @@ class Exchange:
             print(f"  Error balance: {e}")
             return 0.0
 
+    # ── Binance public methods (for gainer slot paper trading) ─────────────────
+
+    def _get_binance(self):
+        """Lazy-init Binance public connection (no API key needed)."""
+        if not hasattr(self, "_binance_public") or self._binance_public is None:
+            self._binance_public = ccxt.binance({"enableRateLimit": True})
+        return self._binance_public
+
+    def get_binance_ticker(self, symbol: str) -> dict:
+        """Current Binance ticker for USDT gainer symbols."""
+        try:
+            t = self._get_binance().fetch_ticker(symbol)
+            return {
+                "ask": t.get("ask", 0),
+                "bid": t.get("bid", 0),
+                "last": t.get("last", 0),
+                "volume": t.get("quoteVolume", 0),
+                "change_pct": t.get("percentage", 0),
+            }
+        except Exception as e:
+            print(f"  Error Binance ticker {symbol}: {e}")
+            return {}
+
+    def place_gainer_paper_order(self, symbol: str, side: str, volume: float) -> dict:
+        """
+        Paper-simulate a Binance gainer trade.
+        Treats 1 USDT ≈ 1 EUR for paper trading simplicity.
+        Binance fee: 0.1% (vs Kraken 0.26%).
+        """
+        ticker = self.get_binance_ticker(symbol)
+        if not ticker or not ticker.get("last"):
+            return {"status": "error", "error": "No Binance price data"}
+
+        exec_price = ticker.get("ask" if side == "buy" else "bid") or ticker["last"]
+        cost = volume * exec_price
+        fee = cost * 0.001  # Binance taker fee ~0.1%
+
+        if side == "buy":
+            total = cost + fee
+            if total > self.paper_balance:
+                return {"status": "error", "error": f"Balance {self.paper_balance:.2f} < {total:.2f}"}
+            self.paper_balance -= total
+        else:
+            self.paper_balance += cost - fee
+
+        return {
+            "status": "ok",
+            "txid": [f"GAINER-PAPER-{int(time.time())}"],
+            "price": exec_price,
+            "cost": cost,
+            "fee": fee,
+        }
+
+    # ── Kraken methods ──────────────────────────────────────────────────────────
+
     def get_min_order(self, symbol: str) -> float:
         """Get minimum order size for a symbol."""
         self._ensure_markets()

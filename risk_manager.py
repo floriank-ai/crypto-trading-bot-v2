@@ -86,6 +86,11 @@ class RiskManager:
     def calculate_position_size(self, balance: float, price: float, strategy: str = "momentum",
                                  dca_multiplier: float = 1.0, leverage: int = 1) -> float:
         """Calculate position size. DCA uses fixed EUR amount, others use risk %."""
+        if strategy == "gainer":
+            # 10% of portfolio — caller (execute_gainer_trade) computes this directly
+            amount_eur = balance * Config.GAINER_SLOT_PCT
+            return round(amount_eur / price, 8) if price > 0 else 0
+
         if strategy == "dca":
             amount_eur = Config.DCA_AMOUNT_EUR * dca_multiplier
             amount_eur = min(amount_eur, balance * 0.20)  # never more than 20% of balance
@@ -105,6 +110,7 @@ class RiskManager:
         return round(position_value / price, 8) if price > 0 else 0
 
     MAX_DCA_POSITIONS = 3
+    MAX_GAINER_POSITIONS = 1  # always exactly 1 gainer slot
     MAX_SHORT_POSITIONS = 6  # bis zu 50% Shorts erlaubt
 
     def get_weakest_position(self, exchange) -> str | None:
@@ -132,6 +138,10 @@ class RiskManager:
             return False
         if len(self.open_positions) >= self.max_positions:
             return False
+        if strategy == "gainer":
+            gainer_count = sum(1 for p in self.open_positions.values() if p.get("strategy") == "gainer")
+            if gainer_count >= self.MAX_GAINER_POSITIONS:
+                return False
         if strategy == "dca":
             dca_count = sum(1 for p in self.open_positions.values() if p.get("strategy") == "dca")
             if dca_count >= self.MAX_DCA_POSITIONS:
@@ -147,6 +157,10 @@ class RiskManager:
         """Track a new position with strategy-aware SL/TP. direction: long or short."""
         sl_pct = self.stop_loss_pct * 1.5 if strategy == "sentiment" else self.stop_loss_pct
         tp_pct = self.take_profit_pct * 1.5 if strategy == "sentiment" else self.take_profit_pct
+
+        if strategy == "gainer":
+            sl_pct = Config.GAINER_SL_PCT   # tight SL: meme coins dump hard
+            tp_pct = Config.GAINER_TP_PCT   # high TP: these can run far
 
         if strategy == "grid":
             sl_pct = Config.GRID_SPREAD_PCT
@@ -214,13 +228,16 @@ class RiskManager:
         """Calculate total portfolio value including open positions."""
         total = exchange.get_balance()
         for symbol, pos in self.open_positions.items():
-            ticker = exchange.get_ticker(symbol)
+            # Gainer positions use Binance prices (USDT ≈ EUR for paper trading)
+            if pos.get("strategy") == "gainer":
+                ticker = exchange.get_binance_ticker(symbol)
+            else:
+                ticker = exchange.get_ticker(symbol)
             if not ticker or not ticker.get("last"):
                 continue
             current_price = ticker["last"]
             direction = pos.get("direction", "long")
             if direction == "short":
-                # Short P&L: Gewinn wenn Preis fällt
                 pnl = (pos["entry_price"] - current_price) * pos["volume"]
                 total += pos["margin"] + pnl
             else:

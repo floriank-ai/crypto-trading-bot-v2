@@ -27,13 +27,21 @@ class Config:
     # Strategies
     ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment").split(",")
 
-    # Momentum: Diese Coins werden für Momentum-Trades gemieden (Backtest: schlechte Performance)
-    # Automatisch generiert vom Auto-Optimizer (137 Coins, 3 Monate Backtest, TP=18% SL=6%)
-    MOMENTUM_SKIP = os.getenv("MOMENTUM_SKIP", "0G/EUR,ACT/EUR,ACX/EUR,ADX/EUR,AEVO/EUR,AIXBT/EUR,ALCX/EUR,ALICE/EUR,ALT/EUR,ANKR/EUR,APE/EUR,API3/EUR,APT/EUR,AR/EUR,ARB/EUR,ARKM/EUR,ARPA/EUR,ASTR/EUR,ATOM/EUR,AUCTION/EUR,AUDIO/EUR,AVNT/EUR,BANANAS31/EUR,BAT/EUR,BIGTIME/EUR,BIO/EUR,BLUR/EUR,BMT/EUR,BNB/EUR,BNT/EUR,BREV/EUR,C98/EUR,CELO/EUR,CELR/EUR,CFG/EUR,CHR/EUR,CHZ/EUR,COTI/EUR,COW/EUR,CVC/EUR,CYBER/EUR,DASH/EUR,DENT/EUR,DOGS/EUR,DYDX/EUR,ENA/EUR,ENJ/EUR,ETHFI/EUR,EUL/EUR,FARM/EUR,FLOW/EUR,FLUX/EUR,FUN/EUR,GMT/EUR,GNO/EUR,HBAR/EUR,HFT/EUR,HMSTR/EUR,HOLO/EUR,ICP/EUR,ICX/EUR,IDEX/EUR,INIT/EUR,INJ/EUR,JST/EUR,JUP/EUR,KERNEL/EUR,KMNO/EUR,KNC/EUR,LAYER/EUR,LINK/EUR,LPT/EUR,LRC/EUR,LSK/EUR,LUNC/EUR,MANA/EUR,MEME/EUR,MET/EUR,METIS/EUR,MINA/EUR,MIRA/EUR,NEIRO/EUR,NIGHT/EUR,NIL/EUR,OGN/EUR,OPEN/EUR,OXT/EUR,PEPE/EUR,PHA/EUR,PLUME/EUR,PNUT/EUR,PUMP/EUR,QNT/EUR,QTUM/EUR,RAD/EUR,RARE/EUR,RAY/EUR,RENDER/EUR,REZ/EUR,RLC/EUR,RPL/EUR,S/EUR,SAHARA/EUR,SAND/EUR,SCRT/EUR,SENT/EUR,SKY/EUR,SNX/EUR,SOLV/EUR,SPELL/EUR,SPK/EUR,SSV/EUR,STORJ/EUR,SUI/EUR,SUPER/EUR,SUSHI/EUR,TLM/EUR,TNSR/EUR,TREE/EUR,TRU/EUR,TRUMP/EUR,TRX/EUR,UNI/EUR,USUAL/EUR,VANRY/EUR,VET/EUR,WAL/EUR,WBTC/EUR,WIF/EUR,WLD/EUR,WLFI/EUR,WOO/EUR,YB/EUR,YFI/EUR,YGG/EUR,ZAMA/EUR,ZRX/EUR").split(",")
+    # Momentum-Prioritätsliste: Coins die historisch gut mit Momentum funktionieren
+    # Wird wöchentlich vom Auto-Optimizer befüllt — kein hardcoded Ban mehr
+    # Alle anderen Coins sind weiterhin handelbar, kommen nur weiter hinten im Scan
+    MOMENTUM_PRIORITY: list = []  # wird bei Startup aus optimizer_state.json geladen
 
     # Scanner
     SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 50))
     AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 10))
+
+    # Gainer Slot (Binance top gainers)
+    GAINER_SLOT_PCT = float(os.getenv("GAINER_SLOT_PCT", 0.10))         # 10% of portfolio per trade
+    GAINER_MIN_GAIN_24H = float(os.getenv("GAINER_MIN_GAIN_24H", 15.0)) # min 24h gain %
+    GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.07))             # stop loss 7%
+    GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.20))             # take profit 20%
+    GAINER_SCAN_INTERVAL_MINUTES = int(os.getenv("GAINER_SCAN_INTERVAL_MINUTES", 15))
 
     # Grid
     GRID_LEVELS = int(os.getenv("GRID_LEVELS", 10))

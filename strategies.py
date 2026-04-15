@@ -160,6 +160,47 @@ class GridStrategy:
         self.grids.pop(symbol, None)
 
 
+class GainerStrategy:
+    """Entry filter for top gainers: avoid buying at the absolute peak."""
+
+    def analyze(self, df: pd.DataFrame, gain_24h: float = 0) -> dict:
+        if df.empty or len(df) < 20:
+            return {"signal": Signal.HOLD, "reason": "Not enough data", "strategy": "gainer"}
+
+        close = df["close"]
+
+        # RSI: skip if extremely overbought (already at top)
+        rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+        if rsi > 80:
+            return {"signal": Signal.HOLD,
+                    "reason": f"RSI {rsi:.0f} too overbought — likely at peak",
+                    "strategy": "gainer"}
+
+        # EMA trend: must be bullish
+        ema_f = ta.trend.EMAIndicator(close, window=9).ema_indicator().iloc[-1]
+        ema_s = ta.trend.EMAIndicator(close, window=21).ema_indicator().iloc[-1]
+        if ema_f <= ema_s:
+            return {"signal": Signal.HOLD,
+                    "reason": "EMA not bullish",
+                    "strategy": "gainer"}
+
+        # Volume: must still have elevated volume (not fading)
+        avg_vol = df["volume"].rolling(20).mean().iloc[-1]
+        if avg_vol > 0 and df["volume"].iloc[-1] < avg_vol * 0.7:
+            return {"signal": Signal.HOLD,
+                    "reason": "Volume fading — momentum dying",
+                    "strategy": "gainer"}
+
+        return {
+            "signal": Signal.BUY,
+            "reason": f"Gainer +{gain_24h:.0f}% 24h | RSI {rsi:.0f} | EMA bullish | vol ok",
+            "rsi": round(rsi, 2),
+            "price": round(close.iloc[-1], 8),
+            "strategy": "gainer",
+            "leverage": 1,
+        }
+
+
 class DCAStrategy:
     """Dollar Cost Averaging: buy at regular intervals, more when price is low."""
 
