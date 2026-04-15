@@ -68,7 +68,16 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
     if side == "buy" or (side == "sell" and direction == "short"):
         strategy = analysis.get("strategy", "momentum")
         if not risk_manager.can_open_position(symbol, strategy, direction):
-            print(f"    Skip: max positions reached or already holding {symbol}")
+            if symbol in risk_manager.open_positions:
+                print(f"    Skip: already holding {symbol}")
+            elif len(risk_manager.open_positions) >= risk_manager.max_positions:
+                print(f"    Skip: max positions ({risk_manager.max_positions}) reached")
+            elif strategy == "dca":
+                print(f"    Skip: DCA-Cap erreicht (max {risk_manager.MAX_DCA_POSITIONS} DCA-Positionen)")
+            elif strategy == "gainer":
+                print(f"    Skip: Gainer-Slot belegt")
+            else:
+                print(f"    Skip: Position nicht möglich ({symbol})")
             return False
 
         dca_mult = analysis.get("dca_multiplier", 1.0)

@@ -10,7 +10,8 @@ class GainerScanner:
     """Scans Binance for top gainers with momentum confirmation."""
 
     def __init__(self):
-        self.binance = ccxt.binance({"enableRateLimit": True})
+        # KuCoin: keine Geo-Sperre, globale Verfügbarkeit, gleiche USDT-Paare wie Binance
+        self.binance = ccxt.kucoin({"enableRateLimit": True})
         self._markets_loaded = False
 
     def _ensure_markets(self):

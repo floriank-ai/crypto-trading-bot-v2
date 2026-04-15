@@ -132,9 +132,9 @@ class Exchange:
     # ── Binance public methods (for gainer slot paper trading) ─────────────────
 
     def _get_binance(self):
-        """Lazy-init Binance public connection (no API key needed)."""
+        """Lazy-init KuCoin public connection (no API key, no geo-restrictions)."""
         if not hasattr(self, "_binance_public") or self._binance_public is None:
-            self._binance_public = ccxt.binance({"enableRateLimit": True})
+            self._binance_public = ccxt.kucoin({"enableRateLimit": True})
         return self._binance_public
 
     def get_binance_ticker(self, symbol: str) -> dict:
