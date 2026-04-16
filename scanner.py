@@ -58,7 +58,9 @@ class CoinScanner:
                 if core_data:
                     top.append(core_data)
 
-        return top
+        # Return top picks PLUS all other scanned coins (for gainer detection)
+        # main.py uses top[:AUTO_PICK_COUNT] for strategies, full list for gainer scan
+        return top + [s for s in scored if s["symbol"] not in {x["symbol"] for x in top}]
 
     def _calculate_score(self, symbol: str, ticker: dict) -> dict | None:
         """Calculate opportunity score for a coin."""

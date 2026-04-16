@@ -527,8 +527,19 @@ def run_bot():
 
             # 2. Scan for best coins
             scan_results = scanner.scan()
-            scanner.print_results(scan_results)
-            target_symbols = [r["symbol"] for r in scan_results]
+            scanner.print_results(scan_results[:Config.AUTO_PICK_COUNT])
+            target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
+
+            # Gainer Discovery: bester Gainer aus ALLEN gescannten Coins (nicht nur Top 10)
+            if not gainer_slot_occupied:
+                top_gainer = max(
+                    (r for r in scan_results if r.get("change_pct", 0) >= Config.GAINER_MIN_GAIN_24H),
+                    key=lambda r: r.get("change_pct", 0),
+                    default=None,
+                )
+                if top_gainer and top_gainer["symbol"] not in target_symbols:
+                    target_symbols.insert(0, top_gainer["symbol"])
+                    print(f"  [Gainer] {top_gainer['symbol']} +{top_gainer['change_pct']:.0f}% → zur Analyse vorgezogen")
 
             # 3. Check news sentiment
             if "sentiment" in active:
