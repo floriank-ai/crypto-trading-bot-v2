@@ -169,11 +169,11 @@ class GainerStrategy:
 
         close = df["close"]
 
-        # RSI: skip if extremely overbought (already at top)
+        # RSI: skip only if extremely overbought (>88 — gainer coins naturally have high RSI)
         rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
-        if rsi > 80:
+        if rsi > 88:
             return {"signal": Signal.HOLD,
-                    "reason": f"RSI {rsi:.0f} too overbought — likely at peak",
+                    "reason": f"RSI {rsi:.0f} extreme peak — skip",
                     "strategy": "gainer"}
 
         # EMA trend: must be bullish

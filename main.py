@@ -608,6 +608,8 @@ def run_bot():
                         if sig["signal"] == Signal.BUY:
                             signals.append(sig)
                             print(f"    [gainer] BUY: {sig['reason']}")
+                        else:
+                            print(f"    [gainer] SKIP {symbol} +{gain_24h:.0f}%: {sig['reason']}")
 
                 # Execute best signal (highest priority: gainer > sentiment > momentum > grid > dca)
                 if signals:
