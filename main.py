@@ -443,7 +443,7 @@ def run_bot():
                         continue
                     cur = ticker["last"]
                     pnl_pct = (pos["entry_price"] - cur) / pos["entry_price"]
-                    if pnl_pct < -0.02:  # Short ist >2% im Minus
+                    if pnl_pct < -0.01:  # Short ist >1% im Minus
                         print(f"  [MarktExit] BTC bullisch + {sym} SHORT -{abs(pnl_pct)*100:.1f}% → schließen")
                         res = exchange.place_order(sym, "buy", pos["volume"], direction="short")
                         if res["status"] == "ok":
@@ -475,7 +475,7 @@ def run_bot():
                         continue
                     cur = ticker["last"]
                     pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
-                    if pnl_pct < -0.02:  # Long ist >2% im Minus
+                    if pnl_pct < -0.01:  # Long ist >1% im Minus
                         print(f"  [MarktExit] BTC bearisch + {sym} LONG -{abs(pnl_pct)*100:.1f}% → schließen")
                         res = exchange.place_order(sym, "sell", pos["volume"])
                         if res["status"] == "ok":
