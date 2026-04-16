@@ -260,7 +260,7 @@ def run_bot():
             unreal = (cur - p["entry_price"]) * p["volume"] if d == "long" else (p["entry_price"] - cur) * p["volume"]
             if p.get("strategy") == "gainer":
                 icon = "🚀" if unreal >= 0 else "💥"
-                lines.append(f"  {icon} *{sym}* [BINANCE]: `{unreal:+.2f}EUR`")
+                lines.append(f"  {icon} *{sym}* [GAINER]: `{unreal:+.2f}EUR`")
             else:
                 icon = "🟢" if unreal >= 0 else "🔴"
                 lines.append(f"  {icon} {sym} [{d.upper()}]: `{unreal:+.2f}EUR`")
