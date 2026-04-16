@@ -530,16 +530,25 @@ def run_bot():
             scanner.print_results(scan_results[:Config.AUTO_PICK_COUNT])
             target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
 
-            # Gainer Discovery: bester Gainer aus ALLEN gescannten Coins (nicht nur Top 10)
+            # Gainer Discovery: bester Gainer aus ALLEN Kraken EUR-Paaren
             if not gainer_slot_occupied:
-                top_gainer = max(
-                    (r for r in scan_results if r.get("change_pct", 0) >= Config.GAINER_MIN_GAIN_24H),
-                    key=lambda r: r.get("change_pct", 0),
+                all_eur_pairs = [p for p in exchange.get_all_eur_pairs()
+                                 if p not in CoinScanner.SKIP_COINS and p not in risk_mgr.open_positions]
+                all_tickers = exchange.get_tickers_bulk(all_eur_pairs)
+                top_gainer_sym = max(
+                    (sym for sym, t in all_tickers.items()
+                     if (t.get("change_pct") or 0) >= Config.GAINER_MIN_GAIN_24H
+                     and (t.get("volume") or 0) >= 50000),
+                    key=lambda s: all_tickers[s].get("change_pct", 0),
                     default=None,
                 )
-                if top_gainer and top_gainer["symbol"] not in target_symbols:
-                    target_symbols.insert(0, top_gainer["symbol"])
-                    print(f"  [Gainer] {top_gainer['symbol']} +{top_gainer['change_pct']:.0f}% → zur Analyse vorgezogen")
+                if top_gainer_sym:
+                    gain = all_tickers[top_gainer_sym].get("change_pct", 0)
+                    print(f"  [Gainer] Bester Kandidat: {top_gainer_sym} +{gain:.0f}%")
+                    if top_gainer_sym not in target_symbols:
+                        target_symbols.insert(0, top_gainer_sym)
+                else:
+                    print(f"  [Gainer] Kein Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% gefunden")
 
             # 3. Check news sentiment
             if "sentiment" in active:
