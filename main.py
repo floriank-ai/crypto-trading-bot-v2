@@ -376,6 +376,8 @@ def run_bot():
     hwm_pause_until = 0
     # Kill-Switch: {strategy_name: unix_ts_until} — blutende Strategien pausieren
     paused_strategies = {}
+    # Gainer-Alert Debounce: {symbol: unix_ts_alerted} — damit nicht jeder Cycle spammt
+    alerted_gainers = {}
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
@@ -638,14 +640,44 @@ def run_bot():
             scanner.print_results(scan_results[:Config.AUTO_PICK_COUNT])
             target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
 
-            # Gainer Discovery: Top-N Gainer aus ALLEN Kraken EUR-Paaren
-            # (N = offene Gainer-Slots, idR 2)
+            # Gainer Discovery + Alarm: IMMER scannen (auch bei vollen Slots),
+            # damit der Alarm bei besonders starken Gainern feuern kann — du
+            # kannst dann manuell entscheiden ob du 'ne schwache Position fuer
+            # den Super-Gainer opferst.
             gainer_gain_lookup = {}  # symbol -> 24h change_pct (fuer per-symbol gainer check)
+            all_eur_pairs = [p for p in exchange.get_all_eur_pairs()
+                             if p not in CoinScanner.SKIP_COINS and p not in risk_mgr.open_positions]
+            all_tickers = exchange.get_tickers_bulk(all_eur_pairs)
+
+            # Alarm-Scan: alle Kandidaten ueber ALERT_THRESHOLD, debounced
+            alert_cutoff = time.time() - Config.GAINER_ALERT_DEBOUNCE_HOURS * 3600
+            for sym, alerted_ts in list(alerted_gainers.items()):
+                if alerted_ts < alert_cutoff:
+                    del alerted_gainers[sym]
+            for sym, t in all_tickers.items():
+                gain = t.get("change_pct") or 0
+                if gain < Config.GAINER_ALERT_THRESHOLD:
+                    continue
+                if (t.get("volume") or 0) < 50000:
+                    continue
+                if sym in alerted_gainers:
+                    continue
+                price = t.get("last", 0)
+                volume = t.get("volume", 0)
+                bot_status = ("Bot oeffnet automatisch" if not gainer_slot_occupied
+                              else f"Slots voll ({gainer_count}/{risk_mgr.MAX_GAINER_POSITIONS}) — manuell pruefen")
+                msg = (f"🚀 GAINER-ALARM: {sym}\n"
+                       f"24h: +{gain:.0f}%\n"
+                       f"Preis: {price:.4f}EUR\n"
+                       f"Volumen: {volume:,.0f}\n"
+                       f"Status: {bot_status}")
+                print(f"\n  🚀 [Gainer-Alarm] {sym} +{gain:.0f}% → Telegram\n")
+                notifier.send(msg)
+                alerted_gainers[sym] = time.time()
+
+            # Slot-Filling: Top-N Gainer fuer freie Slots
             if not gainer_slot_occupied:
                 slots_free = risk_mgr.MAX_GAINER_POSITIONS - gainer_count
-                all_eur_pairs = [p for p in exchange.get_all_eur_pairs()
-                                 if p not in CoinScanner.SKIP_COINS and p not in risk_mgr.open_positions]
-                all_tickers = exchange.get_tickers_bulk(all_eur_pairs)
                 candidates = sorted(
                     ((sym, t.get("change_pct", 0)) for sym, t in all_tickers.items()
                      if (t.get("change_pct") or 0) >= Config.GAINER_MIN_GAIN_24H

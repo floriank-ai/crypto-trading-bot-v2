@@ -46,6 +46,10 @@ class Config:
     GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.06))             # stop loss 6%
     GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.12))             # take profit 12% (partial-TP + trail vorher)
     GAINER_SCAN_INTERVAL_MINUTES = int(os.getenv("GAINER_SCAN_INTERVAL_MINUTES", 15))
+    # Telegram-Alarm ab diesem 24h-Gewinn (unabhaengig von Slot-Status — damit du
+    # manuell entscheiden kannst, auch wenn Slots voll sind). Debounce 4h pro Symbol.
+    GAINER_ALERT_THRESHOLD = float(os.getenv("GAINER_ALERT_THRESHOLD", 50.0))
+    GAINER_ALERT_DEBOUNCE_HOURS = float(os.getenv("GAINER_ALERT_DEBOUNCE_HOURS", 4.0))
 
     # Grid
     GRID_LEVELS = int(os.getenv("GRID_LEVELS", 10))
