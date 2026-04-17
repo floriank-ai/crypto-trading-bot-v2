@@ -22,7 +22,7 @@ class Config:
     # TP bewusst nah dran — Partial-TP (2.5%/5%) + Trailing sollen vorher greifen.
     # Hart-Cap als Sicherheitsnetz, falls Preis durchschießt.
     TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.08))
-    MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
+    MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 5))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 

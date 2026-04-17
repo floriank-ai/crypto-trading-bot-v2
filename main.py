@@ -91,6 +91,12 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
                 print(f"    Skip: already holding {symbol}")
             elif len(risk_manager.open_positions) >= risk_manager.max_positions:
                 print(f"    Skip: max positions ({risk_manager.max_positions}) reached")
+            elif direction == "long" and sum(1 for p in risk_manager.open_positions.values()
+                                             if p.get("direction", "long") == "long") >= risk_manager.MAX_LONG_POSITIONS:
+                print(f"    Skip: LONG-Cap erreicht (max {risk_manager.MAX_LONG_POSITIONS} Longs — Korrelations-Schutz)")
+            elif direction == "short" and sum(1 for p in risk_manager.open_positions.values()
+                                              if p.get("direction") == "short") >= risk_manager.MAX_SHORT_POSITIONS:
+                print(f"    Skip: SHORT-Cap erreicht (max {risk_manager.MAX_SHORT_POSITIONS} Shorts — Korrelations-Schutz)")
             elif strategy == "dca":
                 print(f"    Skip: DCA-Cap erreicht (max {risk_manager.MAX_DCA_POSITIONS} DCA-Positionen)")
             elif strategy == "gainer":
@@ -469,6 +475,13 @@ def run_bot():
                 trend_str = f"BTC {btc_change*100:+.2f}% → {'BULLISH' if market_bullish else 'BEARISH' if market_bearish else 'NEUTRAL'}"
                 print(f"  Markt: {trend_str}")
 
+            # Regime-Gate: Neue Entries NUR in passendem Trend-Regime.
+            # NEUTRAL = nichts öffnen, nur manage. Grund: 12h-Log zeigte 0/9 Winrate,
+            # ~52% aller Entries in NEUTRAL — Whipsaws + 0,26% Fees = negative Expectancy.
+            allow_long_entries = market_bullish
+            allow_short_entries = market_bearish
+            regime_state = "BULLISH" if market_bullish else "BEARISH" if market_bearish else "NEUTRAL"
+
             # Marktkontext-Exit: Shorts schließen wenn BTC dreht bullisch
             # - Verlierer mit >0.5% Minus → cut (Verlust abfedern)
             # - Gewinner ab +1.5% (nach Fees ~+1%) → lock gain (Profit sichern bevor Trend dreht)
@@ -689,6 +702,20 @@ def run_bot():
                     best = max(signals, key=lambda s: priority.get(s.get("strategy", ""), 0))
                     direction = best.get("direction", "long")
                     side = "sell" if direction == "short" else "buy"
+
+                    # Regime-Gate: LONGs nur in BULLISH, SHORTs nur in BEARISH.
+                    # Gainer ist ausgenommen — hat eigenen 15%-24h-Filter, funktioniert
+                    # regime-unabhängig. DCA/Grid sind Akkumulation bzw. Range — diese
+                    # dürfen auch in NEUTRAL laufen.
+                    strat = best.get("strategy", "")
+                    regime_exempt = strat in ("gainer", "dca", "grid")
+                    if not regime_exempt:
+                        if direction == "long" and not allow_long_entries:
+                            print(f"    Skip {symbol}: LONG blockiert (Regime {regime_state})")
+                            continue
+                        if direction == "short" and not allow_short_entries:
+                            print(f"    Skip {symbol}: SHORT blockiert (Regime {regime_state})")
+                            continue
 
                     # Rotation: if strong signal (leverage>=2 OR scanner score>=10) but slots full or barely any cash
                     weakest = None

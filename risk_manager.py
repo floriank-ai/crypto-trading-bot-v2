@@ -185,7 +185,10 @@ class RiskManager:
 
     MAX_DCA_POSITIONS = 3
     MAX_GAINER_POSITIONS = 1  # always exactly 1 gainer slot
-    MAX_SHORT_POSITIONS = 6  # bis zu 50% Shorts erlaubt
+    # Korrelations-Cap: max 3 Positionen pro Richtung, sonst ist das Portfolio nur
+    # gehebeltes BTC-Beta. Bei Peak gestern waren 11 gleiche Richtung = 1,67% in 10 min weg.
+    MAX_LONG_POSITIONS = 3
+    MAX_SHORT_POSITIONS = 3
 
     def get_weakest_position(self, exchange) -> str | None:
         """Return the symbol of the worst-performing open position (for rotation)."""
@@ -223,6 +226,10 @@ class RiskManager:
         if direction == "short":
             short_count = sum(1 for p in self.open_positions.values() if p.get("direction") == "short")
             if short_count >= self.MAX_SHORT_POSITIONS:
+                return False
+        else:  # long (default)
+            long_count = sum(1 for p in self.open_positions.values() if p.get("direction", "long") == "long")
+            if long_count >= self.MAX_LONG_POSITIONS:
                 return False
         return True
 
