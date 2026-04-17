@@ -613,19 +613,18 @@ def run_bot():
             for sym, etype, pnl in exits:
                 print(f"    Exited {sym}: {etype} P&L {pnl:+.2f}EUR")
 
-            # Gainer-Slot Status
-            gainer_slot_occupied = any(
-                p.get("strategy") == "gainer" for p in risk_mgr.open_positions.values()
+            # Gainer-Slot Status: max 2 parallel (MAX_GAINER_POSITIONS=2)
+            gainer_count = sum(
+                1 for p in risk_mgr.open_positions.values() if p.get("strategy") == "gainer"
             )
-            if gainer_slot_occupied:
-                gainer_pos = next(
-                    (f"{sym} [{p['entry_price']:.4f}]"
-                     for sym, p in risk_mgr.open_positions.items()
-                     if p.get("strategy") == "gainer"), ""
-                )
-                print(f"  [Gainer Slot] Aktiv: {gainer_pos}")
-            else:
-                print(f"  [Gainer Slot] Frei — suche Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% 24h Gewinn")
+            gainer_slot_occupied = gainer_count >= risk_mgr.MAX_GAINER_POSITIONS
+            if gainer_count > 0:
+                gainer_syms = [f"{sym}[{p['entry_price']:.4f}]"
+                               for sym, p in risk_mgr.open_positions.items()
+                               if p.get("strategy") == "gainer"]
+                print(f"  [Gainer Slots] {gainer_count}/{risk_mgr.MAX_GAINER_POSITIONS}: {', '.join(gainer_syms)}")
+            if not gainer_slot_occupied:
+                print(f"  [Gainer Slot] Frei ({risk_mgr.MAX_GAINER_POSITIONS-gainer_count} offen) — suche Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% 24h Gewinn")
 
             # Schutz-Phase: keine neuen Trades, bestehende Positionen laufen weiter
             if phase == "protect":
@@ -639,25 +638,27 @@ def run_bot():
             scanner.print_results(scan_results[:Config.AUTO_PICK_COUNT])
             target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
 
-            # Gainer Discovery: bester Gainer aus ALLEN Kraken EUR-Paaren
+            # Gainer Discovery: Top-N Gainer aus ALLEN Kraken EUR-Paaren
+            # (N = offene Gainer-Slots, idR 2)
             gainer_gain_lookup = {}  # symbol -> 24h change_pct (fuer per-symbol gainer check)
             if not gainer_slot_occupied:
+                slots_free = risk_mgr.MAX_GAINER_POSITIONS - gainer_count
                 all_eur_pairs = [p for p in exchange.get_all_eur_pairs()
                                  if p not in CoinScanner.SKIP_COINS and p not in risk_mgr.open_positions]
                 all_tickers = exchange.get_tickers_bulk(all_eur_pairs)
-                top_gainer_sym = max(
-                    (sym for sym, t in all_tickers.items()
+                candidates = sorted(
+                    ((sym, t.get("change_pct", 0)) for sym, t in all_tickers.items()
                      if (t.get("change_pct") or 0) >= Config.GAINER_MIN_GAIN_24H
                      and (t.get("volume") or 0) >= 50000),
-                    key=lambda s: all_tickers[s].get("change_pct", 0),
-                    default=None,
-                )
-                if top_gainer_sym:
-                    gain = all_tickers[top_gainer_sym].get("change_pct", 0)
-                    gainer_gain_lookup[top_gainer_sym] = gain
-                    print(f"  [Gainer] Bester Kandidat: {top_gainer_sym} +{gain:.0f}%")
-                    if top_gainer_sym not in target_symbols:
-                        target_symbols.insert(0, top_gainer_sym)
+                    key=lambda x: x[1], reverse=True,
+                )[:slots_free]
+                if candidates:
+                    for sym, gain in candidates:
+                        gainer_gain_lookup[sym] = gain
+                        if sym not in target_symbols:
+                            target_symbols.insert(0, sym)
+                    cand_str = ", ".join(f"{s} +{g:.0f}%" for s, g in candidates)
+                    print(f"  [Gainer] Kandidaten ({len(candidates)}/{slots_free}): {cand_str}")
                 else:
                     print(f"  [Gainer] Kein Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% gefunden")
 
@@ -692,17 +693,19 @@ def run_bot():
                 signals = []
 
                 # Momentum (Long + Short) — BTC als Gewichtung + Verlustbremse
+                # Regime-Gate HART: kein strong-Bypass mehr. Log 17.04 zeigte 4x SHORT
+                # auf Junk-Alts (BASED/BIO) in BULLISH-Markt — alle gegrillt, weil
+                # strong=leverage>=2 den Gate umgangen hat. Trend-Kampf kostet strukturell.
                 if "momentum" in active:
                     sig = momentum.analyze(df)
-                    strong = sig.get("leverage", 1) >= 2
                     if sig["signal"] == Signal.BUY:
                         if loss_brake:
                             pass  # Verlustbremse: keine Longs
-                        elif not market_bearish or strong:
+                        elif not market_bearish:
                             signals.append(sig)
                             print(f"    [momentum] BUY: {sig['reason']}")
                     elif sig["signal"] == Signal.SELL:
-                        if not market_bullish or strong:
+                        if not market_bullish:
                             sig["direction"] = "short"
                             signals.append(sig)
                             print(f"    [momentum] SHORT: {sig['reason']}")

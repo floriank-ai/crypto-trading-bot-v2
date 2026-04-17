@@ -37,10 +37,10 @@ class MomentumStrategy:
         trending = adx.iloc[-1] > 20
 
         avg_vol = df["volume"].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0
-        # Volumen-Filter entschärft 1.8x -> 1.3x: 1.8x war so selten, dass in 12h-Log
-        # auf 320 Analysen 0 Breakout-Signale kamen. 1.3x ist echte Vol-Bestätigung
-        # ohne die Signale komplett zu killen.
-        vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.3
+        # Volumen-Filter zurueck auf 1.8x: 1.3x produzierte 4/4 Loser SHORTs auf
+        # Junk-Alts in BULLISH-Markt (Log 17.04, -20 EUR in 6h). False-Breakouts
+        # kamen zu billig durch. 1.8x = echte Conviction, weniger aber besser.
+        vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.8
 
         high_20 = close.rolling(20).max().iloc[-2] if len(df) >= 21 else 0
         low_20  = close.rolling(20).min().iloc[-2] if len(df) >= 21 else 999999
@@ -66,12 +66,12 @@ class MomentumStrategy:
                 reasons = ["Breakout new high + volume spike"]
                 leverage = 2
 
-            # Long: RSI oversold + EMA bullish + MACD positiv
-            # Threshold 32 -> 38: realistischer Oversold-Bereich, vorher fast nie getriggert.
+            # Long: RSI extrem oversold + EMA bullish + MACD positiv
+            # Zurueck auf 32 (war auf 38 gelockert -> zu frueh / niedrigere Quality).
             # Nur kaufen wenn Preis noch unter/am BB-Mittelpunkt (wirklich günstig)
-            elif current_rsi < 38 and bullish and macd_hist > 0 and price_now <= bb_middle:
+            elif current_rsi < 32 and bullish and macd_hist > 0 and price_now <= bb_middle:
                 signal = Signal.BUY
-                reasons = [f"RSI {current_rsi:.0f} oversold + MACD pos"]
+                reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
                 leverage = 2
 
             # Short: Breakdown neues Tief + Volumen
@@ -81,12 +81,12 @@ class MomentumStrategy:
                 reasons = ["Breakdown new low + volume spike"]
                 leverage = 2
 
-            # Short: RSI overbought + EMA bearish + MACD negativ
-            # Threshold 68 -> 62: realistischer Overbought-Bereich.
+            # Short: RSI extrem overbought + EMA bearish + MACD negativ
+            # Zurueck auf 68 (war auf 62 gelockert -> zu frueh / niedrigere Quality).
             # Nur shorten wenn Preis noch über/am BB-Mittelpunkt
-            elif current_rsi > 62 and bearish and macd_hist < 0 and price_now >= bb_middle:
+            elif current_rsi > 68 and bearish and macd_hist < 0 and price_now >= bb_middle:
                 signal = Signal.SELL
-                reasons = [f"RSI {current_rsi:.0f} overbought + MACD neg"]
+                reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
                 leverage = 2
 
         return {

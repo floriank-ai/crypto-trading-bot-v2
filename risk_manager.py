@@ -201,7 +201,8 @@ class RiskManager:
         return round(position_value / price, 8) if price > 0 else 0
 
     MAX_DCA_POSITIONS = 3
-    MAX_GAINER_POSITIONS = 1  # always exactly 1 gainer slot
+    MAX_GAINER_POSITIONS = 2  # 2 parallele gainer-slots (Log 17.04: Gainer war einzige
+                              # profitable Strategie — skalieren statt limitieren)
     # Korrelations-Cap: max 3 Positionen pro Richtung, sonst ist das Portfolio nur
     # gehebeltes BTC-Beta. Bei Peak gestern waren 11 gleiche Richtung = 1,67% in 10 min weg.
     MAX_LONG_POSITIONS = 3
