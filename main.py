@@ -640,6 +640,7 @@ def run_bot():
             target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
 
             # Gainer Discovery: bester Gainer aus ALLEN Kraken EUR-Paaren
+            gainer_gain_lookup = {}  # symbol -> 24h change_pct (fuer per-symbol gainer check)
             if not gainer_slot_occupied:
                 all_eur_pairs = [p for p in exchange.get_all_eur_pairs()
                                  if p not in CoinScanner.SKIP_COINS and p not in risk_mgr.open_positions]
@@ -653,6 +654,7 @@ def run_bot():
                 )
                 if top_gainer_sym:
                     gain = all_tickers[top_gainer_sym].get("change_pct", 0)
+                    gainer_gain_lookup[top_gainer_sym] = gain
                     print(f"  [Gainer] Bester Kandidat: {top_gainer_sym} +{gain:.0f}%")
                     if top_gainer_sym not in target_symbols:
                         target_symbols.insert(0, top_gainer_sym)
@@ -731,7 +733,11 @@ def run_bot():
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
                 if not gainer_slot_occupied:
                     coin_data = next((r for r in scan_results if r["symbol"] == symbol), None)
-                    gain_24h = coin_data.get("change_pct", 0) if coin_data else 0
+                    # Fallback: Discovery-Coin (z.B. MOVR) ist nicht in top-50 scan_results,
+                    # aber in gainer_gain_lookup aus get_all_eur_pairs — sonst gain_24h=0
+                    # und Gainer-Check schlaegt silent fehl.
+                    gain_24h = (coin_data.get("change_pct", 0) if coin_data
+                                else gainer_gain_lookup.get(symbol, 0))
                     if gain_24h >= Config.GAINER_MIN_GAIN_24H:
                         sig = gainer_strategy.analyze(df, gain_24h)
                         if sig["signal"] == Signal.BUY:
