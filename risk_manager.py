@@ -48,6 +48,28 @@ class RiskManager:
 
     # ── Trailing Stop-Loss ───────────────────────────────────────────────────
 
+    # Multi-stage trailing: each tuple is (gain_trigger_pct, new_sl_computation)
+    # Earlier/tighter than before — locks small gains before they evaporate.
+    #   +1.5% → SL auf Entry +0.3% (covers Fees von ~0,26% Round-Trip)
+    #   +3%   → SL lock +1% (ein Drittel des Gewinns sichern)
+    #   +5%   → SL lock +2.5% (half-lock)
+    #   +8%   → SL trail 3% unter aktuellem Preis
+    #   +12%  → SL trail 2% unter aktuellem Preis (tight)
+    TRAILING_STAGES_LONG = [
+        (0.015, lambda entry, cur: entry * 1.003),
+        (0.03,  lambda entry, cur: entry * 1.010),
+        (0.05,  lambda entry, cur: entry * 1.025),
+        (0.08,  lambda entry, cur: cur   * 0.970),
+        (0.12,  lambda entry, cur: cur   * 0.980),
+    ]
+    TRAILING_STAGES_SHORT = [
+        (0.015, lambda entry, cur: entry * 0.997),
+        (0.03,  lambda entry, cur: entry * 0.990),
+        (0.05,  lambda entry, cur: entry * 0.975),
+        (0.08,  lambda entry, cur: cur   * 1.030),
+        (0.12,  lambda entry, cur: cur   * 1.020),
+    ]
+
     def update_trailing_stop(self, symbol: str, current_price: float):
         """Nachziehen des Stop-Loss sobald Position im Gewinn."""
         if symbol not in self.open_positions:
@@ -58,30 +80,82 @@ class RiskManager:
 
         if direction == "long":
             pnl_pct = (current_price - entry) / entry
-            if pnl_pct >= 0.14:
-                # Ab +14%: SL 4% unter aktuellem Preis nachziehen
-                new_sl = current_price * (1 - 0.04)
-                if new_sl > pos["stop_loss"]:
-                    pos["stop_loss"] = new_sl
-                    self._save_positions()
-            elif pnl_pct >= 0.09:
-                # Ab +9%: SL auf Break-Even
-                new_sl = entry * 1.001
-                if new_sl > pos["stop_loss"]:
-                    pos["stop_loss"] = new_sl
-                    self._save_positions()
+            stages = self.TRAILING_STAGES_LONG
+            best_sl = pos["stop_loss"]
+            for trigger, fn in stages:
+                if pnl_pct >= trigger:
+                    candidate = fn(entry, current_price)
+                    if candidate > best_sl:
+                        best_sl = candidate
+            if best_sl > pos["stop_loss"]:
+                pos["stop_loss"] = best_sl
+                self._save_positions()
         else:  # short
             pnl_pct = (entry - current_price) / entry
-            if pnl_pct >= 0.14:
-                new_sl = current_price * (1 + 0.04)
-                if new_sl < pos["stop_loss"]:
-                    pos["stop_loss"] = new_sl
-                    self._save_positions()
-            elif pnl_pct >= 0.09:
-                new_sl = entry * 0.999
-                if new_sl < pos["stop_loss"]:
-                    pos["stop_loss"] = new_sl
-                    self._save_positions()
+            stages = self.TRAILING_STAGES_SHORT
+            best_sl = pos["stop_loss"]
+            for trigger, fn in stages:
+                if pnl_pct >= trigger:
+                    candidate = fn(entry, current_price)
+                    if candidate < best_sl:
+                        best_sl = candidate
+            if best_sl < pos["stop_loss"]:
+                pos["stop_loss"] = best_sl
+                self._save_positions()
+
+    # ── Partial Take-Profit ──────────────────────────────────────────────────
+    # Teilverkäufe auf dem Weg nach oben: lock gains, lass Rest als Runner.
+    #   +2.5% → 33% raus
+    #   +5%   → weitere 33% raus (insg. 66%)
+    #   Rest 34% läuft mit Trailing-SL weiter
+    PARTIAL_TP_STAGES = [
+        (0.025, 0.33),
+        (0.05,  0.33),
+    ]
+
+    def check_partial_tp(self, symbol: str, current_price: float):
+        """
+        Return (volume_to_close, stage_idx) if a partial-TP stage is hit, else None.
+        Each position tracks already-taken stages in pos['partial_tps_taken'].
+        Applies to momentum/sentiment/gainer — not grid (has own logic).
+        """
+        if symbol not in self.open_positions:
+            return None
+        pos = self.open_positions[symbol]
+        if pos.get("strategy") in ("grid", "dca"):
+            return None
+        direction = pos.get("direction", "long")
+        entry = pos["entry_price"]
+        if direction == "long":
+            pnl_pct = (current_price - entry) / entry
+        else:
+            pnl_pct = (entry - current_price) / entry
+
+        taken = pos.get("partial_tps_taken", [])
+        initial_volume = pos.get("initial_volume", pos["volume"])
+        for idx, (trigger, fraction) in enumerate(self.PARTIAL_TP_STAGES):
+            if idx in taken:
+                continue
+            if pnl_pct >= trigger:
+                vol_to_close = round(initial_volume * fraction, 8)
+                # Never close more than what's left
+                vol_to_close = min(vol_to_close, pos["volume"])
+                if vol_to_close <= 0:
+                    return None
+                return (vol_to_close, idx)
+        return None
+
+    def record_partial_tp(self, symbol: str, stage_idx: int, volume_closed: float):
+        """Mark a partial-TP stage as done and reduce remaining volume."""
+        if symbol not in self.open_positions:
+            return
+        pos = self.open_positions[symbol]
+        taken = pos.get("partial_tps_taken", [])
+        if stage_idx not in taken:
+            taken.append(stage_idx)
+        pos["partial_tps_taken"] = taken
+        pos["volume"] = max(0.0, pos["volume"] - volume_closed)
+        self._save_positions()
 
     def calculate_position_size(self, balance: float, price: float, strategy: str = "momentum",
                                  dca_multiplier: float = 1.0, leverage: int = 1) -> float:
@@ -183,11 +257,13 @@ class RiskManager:
         self.open_positions[symbol] = {
             "entry_price": price,
             "volume": volume,
+            "initial_volume": volume,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "strategy": strategy,
             "direction": direction,
             "margin": margin,
+            "partial_tps_taken": [],
         }
         self._save_positions()
 

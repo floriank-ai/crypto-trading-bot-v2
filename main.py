@@ -51,6 +51,9 @@ def _restore_positions(risk_mgr, exchange):
             if sym not in valid_symbols:
                 skipped.append(sym)
                 continue
+            # Backwards-compat: Felder für Partial-TP nachziehen falls alte positions.json
+            pos.setdefault("initial_volume", pos["volume"])
+            pos.setdefault("partial_tps_taken", [])
             risk_mgr.open_positions[sym] = pos
             direction = pos.get("direction", "long")
             if direction == "long":
@@ -169,7 +172,7 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
 
 
 def check_exits(exchange, risk_manager, logger, notifier):
-    """Check all open positions for stop-loss / take-profit."""
+    """Check all open positions for partial-TP, stop-loss, take-profit."""
     exits = []
     for symbol in list(risk_manager.open_positions.keys()):
         pos = risk_manager.open_positions[symbol]
@@ -179,6 +182,41 @@ def check_exits(exchange, risk_manager, logger, notifier):
             continue
 
         current_price = ticker["last"]
+
+        # Partial-TP zuerst: Teilverkauf auf dem Weg nach oben
+        partial = risk_manager.check_partial_tp(symbol, current_price)
+        if partial:
+            vol_close, stage_idx = partial
+            direction = pos.get("direction", "long")
+            close_side = "buy" if direction == "short" else "sell"
+            trigger_pct = risk_manager.PARTIAL_TP_STAGES[stage_idx][0] * 100
+            print(f"  >> PARTIAL-TP stage {stage_idx+1} ({trigger_pct:.1f}%) {symbol} [{direction}]: sell {vol_close:.8f}")
+            res = exchange.place_order(symbol, close_side, vol_close, direction=direction)
+            if res["status"] == "ok":
+                cp = res.get("price", current_price)
+                cost = res.get("cost", vol_close * cp)
+                fee = res.get("fee", cost * 0.0026)
+                if direction == "short":
+                    pnl = (pos["entry_price"] - cp) * vol_close - 2 * fee
+                    log_side = "cover"
+                else:
+                    pnl = (cp - pos["entry_price"]) * vol_close - 2 * fee
+                    log_side = "sell"
+                logger.log_trade(pair=symbol, side=log_side, volume=vol_close,
+                                 price=cp, cost=cost, fee=fee,
+                                 mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                 signal_reason=f"partial_tp_{stage_idx+1}",
+                                 balance_after=exchange.get_balance(), realized_pnl=pnl)
+                risk_manager.record_partial_tp(symbol, stage_idx, vol_close)
+                port_val = risk_manager.get_portfolio_value(exchange)
+                d_pnl = risk_manager.get_daily_pnl_pct(exchange)
+                notifier.notify_exit(symbol, f"partial_tp_{stage_idx+1}", pnl, pos["strategy"], port_val, d_pnl)
+                print(f"    Partial: {symbol} P&L {pnl:+.2f}EUR | Restvolumen: {pos['volume']:.8f}")
+            # Weiter mit SL/TP-Check: falls Rest-Volumen eh null, ist Position zu.
+            if pos["volume"] <= 0:
+                risk_manager.close_position(symbol)
+                continue
+
         exit_type = risk_manager.check_exit(symbol, current_price)
 
         if exit_type:
@@ -431,8 +469,10 @@ def run_bot():
                 trend_str = f"BTC {btc_change*100:+.2f}% → {'BULLISH' if market_bullish else 'BEARISH' if market_bearish else 'NEUTRAL'}"
                 print(f"  Markt: {trend_str}")
 
-            # Marktkontext-Exit: verlierend Shorts schließen wenn BTC dreht bullisch
-            # (verhindert dass z.B. BCH-Short weiter blutet wenn BTC plötzlich steigt)
+            # Marktkontext-Exit: Shorts schließen wenn BTC dreht bullisch
+            # - Verlierer mit >0.5% Minus → cut (Verlust abfedern)
+            # - Gewinner ab +1.5% (nach Fees ~+1%) → lock gain (Profit sichern bevor Trend dreht)
+            # - Positionen im 0/0.5%-Dead-Zone laufen weiter
             if market_bullish:
                 for sym in list(risk_mgr.open_positions.keys()):
                     pos = risk_mgr.open_positions[sym]
@@ -443,8 +483,13 @@ def run_bot():
                         continue
                     cur = ticker["last"]
                     pnl_pct = (pos["entry_price"] - cur) / pos["entry_price"]
-                    if pnl_pct < -0.01:  # Short ist >1% im Minus
-                        print(f"  [MarktExit] BTC bullisch + {sym} SHORT -{abs(pnl_pct)*100:.1f}% → schließen")
+                    reason = None
+                    if pnl_pct < -0.005:
+                        reason = f"Verlust -{abs(pnl_pct)*100:.1f}% abfedern"
+                    elif pnl_pct > 0.015:
+                        reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
+                    if reason:
+                        print(f"  [MarktExit] BTC bullisch + {sym} SHORT → {reason}")
                         res = exchange.place_order(sym, "buy", pos["volume"], direction="short")
                         if res["status"] == "ok":
                             cp = res.get("price", cur)
@@ -462,7 +507,9 @@ def run_bot():
                             notifier.notify_exit(sym, "market_context_exit", pnl, pos["strategy"], port_val, d_pnl)
                             print(f"    Geschlossen: {sym} P&L {pnl:+.2f}EUR")
 
-            # Marktkontext-Exit: verlierend Longs schließen wenn BTC dreht bearisch
+            # Marktkontext-Exit: Longs schließen wenn BTC dreht bearisch
+            # - Verlierer mit >0.5% Minus → cut
+            # - Gewinner ab +1.5% → lock gain
             if market_bearish:
                 for sym in list(risk_mgr.open_positions.keys()):
                     pos = risk_mgr.open_positions[sym]
@@ -475,8 +522,13 @@ def run_bot():
                         continue
                     cur = ticker["last"]
                     pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
-                    if pnl_pct < -0.01:  # Long ist >1% im Minus
-                        print(f"  [MarktExit] BTC bearisch + {sym} LONG -{abs(pnl_pct)*100:.1f}% → schließen")
+                    reason = None
+                    if pnl_pct < -0.005:
+                        reason = f"Verlust -{abs(pnl_pct)*100:.1f}% abfedern"
+                    elif pnl_pct > 0.015:
+                        reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
+                    if reason:
+                        print(f"  [MarktExit] BTC bearisch + {sym} LONG → {reason}")
                         res = exchange.place_order(sym, "sell", pos["volume"])
                         if res["status"] == "ok":
                             cp = res.get("price", cur)

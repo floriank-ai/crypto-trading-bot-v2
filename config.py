@@ -18,8 +18,10 @@ class Config:
 
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))
-    STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.06))
-    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.18))
+    STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.04))
+    # TP bewusst nah dran — Partial-TP (2.5%/5%) + Trailing sollen vorher greifen.
+    # Hart-Cap als Sicherheitsnetz, falls Preis durchschießt.
+    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.08))
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
@@ -39,8 +41,8 @@ class Config:
     # Gainer Slot (Binance top gainers)
     GAINER_SLOT_PCT = float(os.getenv("GAINER_SLOT_PCT", 0.10))         # 10% of portfolio per trade
     GAINER_MIN_GAIN_24H = float(os.getenv("GAINER_MIN_GAIN_24H", 15.0)) # min 24h gain %
-    GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.07))             # stop loss 7%
-    GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.20))             # take profit 20%
+    GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.06))             # stop loss 6%
+    GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.12))             # take profit 12% (partial-TP + trail vorher)
     GAINER_SCAN_INTERVAL_MINUTES = int(os.getenv("GAINER_SCAN_INTERVAL_MINUTES", 15))
 
     # Grid
