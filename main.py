@@ -77,7 +77,7 @@ def _restore_positions(risk_mgr, exchange):
         traceback.print_exc()
 
 
-def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analysis, balance, portfolio_val=None):
+def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analysis, balance, portfolio_val=None, drawdown_pct=0.0):
     """Execute a trade and log it."""
     strategy = analysis.get("strategy", "unknown")
     price = analysis.get("price", 0)
@@ -107,7 +107,7 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
 
         dca_mult = analysis.get("dca_multiplier", 1.0)
         leverage = analysis.get("leverage", 1)
-        volume = risk_manager.calculate_position_size(balance, price, strategy, dca_mult, leverage)
+        volume = risk_manager.calculate_position_size(balance, price, strategy, dca_mult, leverage, drawdown_pct)
         min_order = exchange.get_min_order(symbol)
 
         if volume < min_order:
@@ -138,7 +138,7 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
     return False
 
 
-def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analysis, portfolio_val=None):
+def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analysis, portfolio_val=None, drawdown_pct=0.0):
     """Execute a gainer trade on Binance (paper mode). Fixed EUR position size."""
     price = analysis.get("price", 0)
     if price <= 0:
@@ -149,11 +149,22 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
         print(f"    [Gainer] Slot already occupied")
         return False
 
-    # Dynamic: always 10% of current portfolio value
+    # Anti-Martingale: auch Gainer-Slot schrumpft in Drawdown
+    if drawdown_pct >= 3.0:
+        dd_scale = 0.4
+    elif drawdown_pct >= 2.0:
+        dd_scale = 0.5
+    elif drawdown_pct >= 1.0:
+        dd_scale = 0.7
+    else:
+        dd_scale = 1.0
+
+    # Dynamic: always 10% of current portfolio value (* dd_scale bei Drawdown)
     port = portfolio_val if portfolio_val else risk_manager.get_portfolio_value(exchange)
-    amount_eur = port * Config.GAINER_SLOT_PCT
+    amount_eur = port * Config.GAINER_SLOT_PCT * dd_scale
     volume = round(amount_eur / price, 8)
-    print(f"    [Gainer] Size: {amount_eur:.2f}EUR ({Config.GAINER_SLOT_PCT*100:.0f}% of {port:.2f}EUR portfolio)")
+    dd_note = f" [DD-Scale {dd_scale:.1f}x, drawdown {drawdown_pct:.1f}%]" if dd_scale < 1.0 else ""
+    print(f"    [Gainer] Size: {amount_eur:.2f}EUR ({Config.GAINER_SLOT_PCT*100:.0f}% of {port:.2f}EUR portfolio){dd_note}")
     result = exchange.place_order(symbol, "buy", volume)
 
     if result["status"] == "ok":
@@ -363,6 +374,8 @@ def run_bot():
     cycle = 0
     peak_portfolio = actual_portfolio
     hwm_pause_until = 0
+    # Kill-Switch: {strategy_name: unix_ts_until} — blutende Strategien pausieren
+    paused_strategies = {}
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
@@ -463,6 +476,37 @@ def run_bot():
                 print(f"  🔒 HWM-Pause: noch {remaining}min — keine neuen Trades")
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
+
+            # Kill-Switch: Strategie-Performance der letzten 6h prüfen.
+            # Wenn eine Strategie -2% (in EUR: 2% vom Portfolio) netto verloren hat,
+            # pausiert sie für 6h. Verhindert Blutungsphasen einzelner Strategien
+            # (z.B. gainer feuert 5× in bearishem Markt und haut Kapital raus).
+            STRATEGY_PAUSE_THRESHOLD_PCT = 2.0
+            STRATEGY_PAUSE_HOURS = 6.0
+            # Expired pauses aufräumen
+            now_ts = time.time()
+            for strat in list(paused_strategies.keys()):
+                if paused_strategies[strat] <= now_ts:
+                    print(f"  [Kill-Switch] {strat} Pause abgelaufen — wieder aktiv")
+                    del paused_strategies[strat]
+            # Neue Pausen prüfen (nur alle 5 Cycles, um I/O zu sparen)
+            if cycle % 5 == 0:
+                perf = logger.get_strategy_performance(hours=STRATEGY_PAUSE_HOURS)
+                threshold_eur = -(portfolio_val * STRATEGY_PAUSE_THRESHOLD_PCT / 100)
+                for strat, stats in perf.items():
+                    if strat in paused_strategies:
+                        continue
+                    if stats["pnl"] <= threshold_eur and stats["trades"] >= 3:
+                        paused_strategies[strat] = now_ts + STRATEGY_PAUSE_HOURS * 3600
+                        winrate = stats["wins"] / stats["trades"] * 100 if stats["trades"] else 0
+                        msg = (f"[Kill-Switch] {strat} PAUSIERT für {STRATEGY_PAUSE_HOURS:.0f}h "
+                               f"— 6h-P&L {stats['pnl']:+.2f}EUR ({stats['trades']} Trades, "
+                               f"WR {winrate:.0f}%)")
+                        print(f"\n  🚨 {msg}\n")
+                        notifier.send(f"🚨 *{msg}*")
+            if paused_strategies:
+                paused_list = ", ".join(f"{s}({int((ts-now_ts)/60)}m)" for s, ts in paused_strategies.items())
+                print(f"  [Kill-Switch] Pausiert: {paused_list}")
 
             # Markt-Trend-Filter via BTC
             btc_df = exchange.get_ohlcv("BTC/EUR", "1h", limit=3)  # 3h statt 6h → schnellere Reaktion
@@ -708,6 +752,13 @@ def run_bot():
                     # regime-unabhängig. DCA/Grid sind Akkumulation bzw. Range — diese
                     # dürfen auch in NEUTRAL laufen.
                     strat = best.get("strategy", "")
+
+                    # Kill-Switch: pausierte Strategien keine neuen Entries
+                    if strat in paused_strategies:
+                        mins_left = int((paused_strategies[strat] - time.time()) / 60)
+                        print(f"    Skip {symbol}: Strategie {strat} pausiert (Kill-Switch, {mins_left}m)")
+                        continue
+
                     regime_exempt = strat in ("gainer", "dca", "grid")
                     if not regime_exempt:
                         if direction == "long" and not allow_long_entries:
@@ -746,10 +797,12 @@ def run_bot():
                     print(f"    >> Executing {best['strategy']} {direction.upper()} signal")
                     if best["strategy"] == "gainer":
                         traded = execute_gainer_trade(exchange, risk_mgr, logger, notifier,
-                                                      symbol, best, portfolio_val)
+                                                      symbol, best, portfolio_val,
+                                                      drawdown_pct=drawdown_from_peak)
                     else:
                         traded = execute_trade(exchange, risk_mgr, logger, notifier,
-                                               symbol, side, best, balance, portfolio_val)
+                                               symbol, side, best, balance, portfolio_val,
+                                               drawdown_pct=drawdown_from_peak)
                     if traded:
                         recently_traded[symbol] = time.time()
                     if weakest:

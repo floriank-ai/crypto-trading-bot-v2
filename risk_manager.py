@@ -158,29 +158,46 @@ class RiskManager:
         self._save_positions()
 
     def calculate_position_size(self, balance: float, price: float, strategy: str = "momentum",
-                                 dca_multiplier: float = 1.0, leverage: int = 1) -> float:
-        """Calculate position size. DCA uses fixed EUR amount, others use risk %."""
+                                 dca_multiplier: float = 1.0, leverage: int = 1,
+                                 drawdown_pct: float = 0.0) -> float:
+        """Calculate position size. DCA uses fixed EUR amount, others use risk %.
+
+        Anti-Martingale: in drawdown wird die Position KLEINER, nicht groesser.
+        Gegenteil von Martingale — bei Verluststrecke deckeln statt doppeln.
+        """
+        # Anti-Martingale-Scale: drawdown_pct ist der aktuelle Drawdown vom Peak in %
+        if drawdown_pct >= 3.0:
+            dd_scale = 0.4   # HWM greift bei 3% eh, aber wenn wir hier sind: nur 40%
+        elif drawdown_pct >= 2.0:
+            dd_scale = 0.5
+        elif drawdown_pct >= 1.0:
+            dd_scale = 0.7
+        else:
+            dd_scale = 1.0
+
         if strategy == "gainer":
             # 10% of portfolio — caller (execute_gainer_trade) computes this directly
-            amount_eur = balance * Config.GAINER_SLOT_PCT
+            amount_eur = balance * Config.GAINER_SLOT_PCT * dd_scale
             return round(amount_eur / price, 8) if price > 0 else 0
 
         if strategy == "dca":
+            # DCA ist Akkumulation — anti-martingale greift nicht (soll ja im Dip kaufen)
             amount_eur = Config.DCA_AMOUNT_EUR * dca_multiplier
             amount_eur = min(amount_eur, balance * 0.20)  # never more than 20% of balance
             return round(amount_eur / price, 8) if price > 0 else 0
 
         if strategy == "grid":
-            position_value = balance * 0.15  # 15% per grid level
+            position_value = balance * 0.15 * dd_scale  # 15% per grid level
             return round(position_value / price, 8) if price > 0 else 0
 
-        # Momentum / sentiment: aggressive sizing + leverage
+        # Momentum / sentiment: aggressive sizing + leverage + anti-martingale
         risk_amount = balance * self.max_risk
         position_value = risk_amount / self.stop_loss_pct
         max_position = balance * 0.20  # max 20% pro Position
         position_value = min(position_value, max_position)
         position_value *= leverage
         position_value = min(position_value, balance * 0.20)  # auch mit Hebel max 20%
+        position_value *= dd_scale
         return round(position_value / price, 8) if price > 0 else 0
 
     MAX_DCA_POSITIONS = 3

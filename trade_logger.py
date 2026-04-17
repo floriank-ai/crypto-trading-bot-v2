@@ -1,7 +1,7 @@
 import csv
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class TradeLogger:
@@ -107,3 +107,44 @@ class TradeLogger:
             "realized_pnl": round(realized_pnl, 2),
             "strategies": strats,
         }
+
+    def get_strategy_performance(self, hours: float = 6.0) -> dict:
+        """Return per-strategy realized P&L + trade count over the last `hours` hours.
+        Used by the kill-switch to pause bleeding strategies.
+
+        Returns: {strategy: {'pnl': float, 'trades': int, 'wins': int, 'losses': int}}
+        """
+        if not os.path.exists(self.json_path):
+            return {}
+        try:
+            with open(self.json_path, "r") as f:
+                all_entries = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+        cutoff = datetime.now() - timedelta(hours=hours)
+        stats = {}
+        for t in all_entries:
+            if t.get("session_start"):
+                continue
+            if "realized_pnl" not in t:
+                continue  # only closed trades count
+            try:
+                ts = datetime.fromisoformat(t["timestamp"])
+            except (KeyError, ValueError):
+                continue
+            if ts < cutoff:
+                continue
+            strat = t.get("strategy", "unknown")
+            pnl = t.get("realized_pnl", 0)
+            if strat not in stats:
+                stats[strat] = {"pnl": 0.0, "trades": 0, "wins": 0, "losses": 0}
+            stats[strat]["pnl"] += pnl
+            stats[strat]["trades"] += 1
+            if pnl > 0:
+                stats[strat]["wins"] += 1
+            elif pnl < 0:
+                stats[strat]["losses"] += 1
+        for strat in stats:
+            stats[strat]["pnl"] = round(stats[strat]["pnl"], 2)
+        return stats
