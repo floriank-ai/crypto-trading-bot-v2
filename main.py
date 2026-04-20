@@ -374,6 +374,7 @@ def run_bot():
     cycle = 0
     peak_portfolio = actual_portfolio
     hwm_pause_until = 0
+    tageslimit_alerted_today = False  # verhindert Telegram-Spam bei dauerhaftem -5%
     # Kill-Switch: {strategy_name: unix_ts_until} — blutende Strategien pausieren
     paused_strategies = {}
     # Gainer-Alert Debounce: {symbol: unix_ts_alerted} — damit nicht jeder Cycle spammt
@@ -442,6 +443,7 @@ def run_bot():
                 today = datetime.now().date()
                 risk_mgr.daily_start_value = portfolio_val
                 peak_portfolio = portfolio_val
+                tageslimit_alerted_today = False  # Reset fuer neuen Tag
                 print(f"  🌅 Neuer Tag — Tages-Zähler zurückgesetzt auf {portfolio_val:.2f}EUR")
                 notifier.send(f"🌅 Neuer Tag\nNeuer Startpunkt: {portfolio_val:.2f}EUR")
 
@@ -450,38 +452,74 @@ def run_bot():
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
 
             # Tageslimit: bei -5% keine neuen Trades bis Mitternacht
+            # Telegram nur EINMAL pro Tag (nicht bei jeder Cycle spammen)
             if daily_pnl < -5.0:
                 print(f"  🛑 TAGESLIMIT -5% ({daily_pnl:.2f}%) — pausiere bis Mitternacht")
-                notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% Tagesverlust\nKeine neuen Trades bis Mitternacht")
+                if not tageslimit_alerted_today:
+                    notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% Tagesverlust\nKeine neuen Trades bis Mitternacht")
+                    tageslimit_alerted_today = True
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
 
             # High-Water-Mark: Peak tracken und Gewinn sichern
+            # NEUE LOGIK (nach Blutbad 18.04.): close-all realisierte -8.5% Tages-P&L
+            # durch Slippage + Winner-Kill. Jetzt:
+            #   - Loser schliessen (P&L < 0)
+            #   - Winner behalten, aber SL auf Entry+Puffer ziehen (Break-Even-Lock)
+            # So schuetzen wir Peak OHNE laufende Gewinner abzuwuergen.
             if portfolio_val > peak_portfolio:
                 peak_portfolio = portfolio_val
             drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
             meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
             if meaningful_gain and drawdown_from_peak >= 3.0 and time.time() > hwm_pause_until:
-                print(f"\n  🔒 HIGH-WATER-MARK: -{drawdown_from_peak:.1f}% vom Peak ({peak_portfolio:.2f}→{portfolio_val:.2f}EUR) — schliesse alle Positionen!")
-                notifier.send(f"🔒 *HIGH-WATER-MARK*\nPortfolio fiel {drawdown_from_peak:.1f}% vom Peak\n{peak_portfolio:.2f}EUR → {portfolio_val:.2f}EUR\nSchliesse alle Positionen & pause 30min")
+                print(f"\n  🔒 HIGH-WATER-MARK: -{drawdown_from_peak:.1f}% vom Peak ({peak_portfolio:.2f}→{portfolio_val:.2f}EUR)")
+                closed = []
+                locked = []
                 for sym in list(risk_mgr.open_positions.keys()):
                     pos = risk_mgr.open_positions[sym]
-                    res = exchange.place_order(sym, "sell", pos["volume"])
-                    if res["status"] == "ok":
-                        p = res.get("price", pos["entry_price"])
-                        c = res.get("cost", pos["volume"] * p)
-                        f = res.get("fee", c * 0.0026)
-                        pnl = (p - pos["entry_price"]) * pos["volume"]
-                        logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
-                                         price=p, cost=c, fee=f,
-                                         mode=Config.TRADING_MODE, strategy=pos["strategy"],
-                                         signal_reason="hwm_protection",
-                                         balance_after=exchange.get_balance())
-                        print(f"    Closed {sym} P&L {pnl:+.2f}EUR")
-                    risk_mgr.close_position(sym)
-                hwm_pause_until = time.time() + 1800  # 30 Minuten Pause
+                    t = exchange.get_ticker(sym)
+                    cur = (t or {}).get("last", pos["entry_price"])
+                    d = pos.get("direction", "long")
+                    pos_pnl = (cur - pos["entry_price"]) * pos["volume"] if d == "long" else (pos["entry_price"] - cur) * pos["volume"]
+
+                    if pos_pnl < 0:
+                        # Verlierer: schliessen
+                        res = exchange.place_order(sym, "sell", pos["volume"])
+                        if res["status"] == "ok":
+                            p = res.get("price", pos["entry_price"])
+                            c = res.get("cost", pos["volume"] * p)
+                            f = res.get("fee", c * 0.0026)
+                            logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
+                                             price=p, cost=c, fee=f,
+                                             mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                             signal_reason="hwm_close_loser",
+                                             balance_after=exchange.get_balance())
+                            closed.append(f"{sym} ({pos_pnl:+.2f}EUR)")
+                            print(f"    Closed Loser {sym} P&L {pos_pnl:+.2f}EUR")
+                        risk_mgr.close_position(sym)
+                    else:
+                        # Winner: SL auf Entry +/- 0.3% Puffer ziehen (Break-Even-Lock)
+                        buffer = 0.003
+                        new_sl = pos["entry_price"] * (1 + buffer) if d == "long" else pos["entry_price"] * (1 - buffer)
+                        # nur verschieben wenn neuer SL besser ist (fuer long: hoeher, fuer short: niedriger)
+                        old_sl = pos.get("sl", pos["entry_price"])
+                        if (d == "long" and new_sl > old_sl) or (d == "short" and new_sl < old_sl):
+                            pos["sl"] = new_sl
+                            locked.append(f"{sym} ({pos_pnl:+.2f}EUR)")
+                            print(f"    Break-Even-Lock {sym} P&L {pos_pnl:+.2f}EUR, neuer SL={new_sl:.4f}")
+                        else:
+                            locked.append(f"{sym} ({pos_pnl:+.2f}EUR, SL schon enger)")
+
+                msg = f"🔒 *HIGH-WATER-MARK* -{drawdown_from_peak:.1f}%\n{peak_portfolio:.2f}→{portfolio_val:.2f}EUR"
+                if closed:
+                    msg += f"\n❌ Geschlossen ({len(closed)}): {', '.join(closed)}"
+                if locked:
+                    msg += f"\n🔒 Break-Even-Lock ({len(locked)}): {', '.join(locked)}"
+                msg += "\nKeine neuen Trades 30min."
+                notifier.send(msg)
+                hwm_pause_until = time.time() + 1800  # 30 Minuten Pause fuer neue Trades
                 peak_portfolio = risk_mgr.get_portfolio_value(exchange)  # neuer Peak nach Close
-                print(f"  Pause bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')}")
+                print(f"  Pause fuer neue Trades bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')}")
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
 
