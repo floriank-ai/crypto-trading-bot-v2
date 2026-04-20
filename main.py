@@ -447,16 +447,36 @@ def run_bot():
                 print(f"  🌅 Neuer Tag — Tages-Zähler zurückgesetzt auf {portfolio_val:.2f}EUR")
                 notifier.send(f"🌅 Neuer Tag\nNeuer Startpunkt: {portfolio_val:.2f}EUR")
 
+            # Peak-Tracking zuerst (vor TAGESLIMIT, damit Floor nachgezogen werden kann)
+            if portfolio_val > peak_portfolio:
+                peak_portfolio = portfolio_val
+            drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
+            meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
+
+            # Proaktives Floor-Tracking (exponentielles Gewinn-Locking):
+            # Tages-Start wird auf Peak*0.97 gezogen (= HWM-Trigger-Linie).
+            # Greift automatisch ab Peak >+3.1% (dann ist Peak*0.97 > Start).
+            # Konsequenz: TAGESLIMIT (-5%) triggert immer vom aktuellen
+            # Gewinn-Niveau aus, nicht vom starren Mitternachts-Wert.
+            #
+            # Beispiel: Start 1000, Peak 1070 → Floor 1037.90
+            # → TAGESLIMIT bei 986 statt 950 (32 EUR mehr Schutz).
+            new_base = peak_portfolio * 0.97
+            if new_base > risk_mgr.daily_start_value:
+                print(f"  📈 Floor-Lock: Tages-Start {risk_mgr.daily_start_value:.2f} → {new_base:.2f}EUR (Peak {peak_portfolio:.2f})")
+                risk_mgr.daily_start_value = new_base
+                tageslimit_alerted_today = False  # neuer Trigger fuer neues Level moeglich
+
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
 
-            # Tageslimit: bei -5% keine neuen Trades bis Mitternacht
+            # Tageslimit: bei -5% vom (evtl nachgezogenen) Tages-Start keine neuen Trades bis Mitternacht
             # Telegram nur EINMAL pro Tag (nicht bei jeder Cycle spammen)
             if daily_pnl < -5.0:
                 print(f"  🛑 TAGESLIMIT -5% ({daily_pnl:.2f}%) — pausiere bis Mitternacht")
                 if not tageslimit_alerted_today:
-                    notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% Tagesverlust\nKeine neuen Trades bis Mitternacht")
+                    notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% vom Tages-Boden ({risk_mgr.daily_start_value:.2f}EUR)\nKeine neuen Trades bis Mitternacht")
                     tageslimit_alerted_today = True
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
@@ -467,10 +487,6 @@ def run_bot():
             #   - Loser schliessen (P&L < 0)
             #   - Winner behalten, aber SL auf Entry+Puffer ziehen (Break-Even-Lock)
             # So schuetzen wir Peak OHNE laufende Gewinner abzuwuergen.
-            if portfolio_val > peak_portfolio:
-                peak_portfolio = portfolio_val
-            drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
-            meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
             if meaningful_gain and drawdown_from_peak >= 3.0 and time.time() > hwm_pause_until:
                 print(f"\n  🔒 HIGH-WATER-MARK: -{drawdown_from_peak:.1f}% vom Peak ({peak_portfolio:.2f}→{portfolio_val:.2f}EUR)")
                 closed = []
@@ -519,7 +535,14 @@ def run_bot():
                 notifier.send(msg)
                 hwm_pause_until = time.time() + 1800  # 30 Minuten Pause fuer neue Trades
                 peak_portfolio = risk_mgr.get_portfolio_value(exchange)  # neuer Peak nach Close
-                print(f"  Pause fuer neue Trades bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')}")
+                # Tages-Start auf neuen Boden ziehen: HWM hat Verluste abgeschnitten,
+                # ab hier gilt der neue Wert als Basis fuer TAGESLIMIT. Ohne Reset
+                # wuerde TAGESLIMIT sofort triggern weil der Close selbst -5% gekostet
+                # haben kann (Slippage). Mit Reset: -5% vom neuen Boden = echter Stop.
+                if peak_portfolio > risk_mgr.daily_start_value:
+                    risk_mgr.daily_start_value = peak_portfolio
+                tageslimit_alerted_today = False  # neuer Trigger moeglich
+                print(f"  Pause fuer neue Trades bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')} | neuer Tages-Boden {risk_mgr.daily_start_value:.2f}EUR")
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
 
