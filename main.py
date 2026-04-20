@@ -12,7 +12,7 @@ import sys
 from datetime import datetime
 
 from config import Config
-from auto_optimizer import should_run_today, run as run_optimizer, load_state
+from auto_optimizer import should_run_today, run as run_optimizer, load_state, save_state
 from exchange import Exchange
 from scanner import CoinScanner
 from strategies import MomentumStrategy, GridStrategy, DCAStrategy, GainerStrategy, Signal
@@ -429,7 +429,6 @@ def run_bot():
                     print(f"  [Optimizer] Neue Prioritätsliste: {new_priority[:5]}...")
                 except Exception as opt_err:
                     # State mit last_run=heute speichern damit nicht jeder Cycle retriggert
-                    from auto_optimizer import save_state, load_state
                     st = load_state()
                     st["last_run"] = datetime.now().isoformat()
                     st["last_error"] = str(opt_err)[:200]
