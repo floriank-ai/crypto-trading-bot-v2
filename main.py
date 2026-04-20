@@ -419,10 +419,23 @@ def run_bot():
                 )
 
             # Wöchentlicher Auto-Optimizer (jeden Sonntag)
+            # Hart gewrappt — sonst crasht die ganze Cycle-Schleife bei Binance-Geo-Block
+            # (Railway-IP ist aus Sicht Binance "restricted location", HTTP 451).
             if should_run_today():
-                new_priority = run_optimizer(notifier)
-                Config.MOMENTUM_PRIORITY = new_priority
-                print(f"  [Optimizer] Neue Prioritätsliste: {new_priority[:5]}...")
+                try:
+                    new_priority = run_optimizer(notifier)
+                    Config.MOMENTUM_PRIORITY = new_priority
+                    print(f"  [Optimizer] Neue Prioritätsliste: {new_priority[:5]}...")
+                except Exception as opt_err:
+                    # State mit last_run=heute speichern damit nicht jeder Cycle retriggert
+                    from auto_optimizer import save_state, load_state
+                    st = load_state()
+                    st["last_run"] = datetime.now().isoformat()
+                    st["last_error"] = str(opt_err)[:200]
+                    save_state(st)
+                    print(f"  [Optimizer] FEHLER (skip bis nächsten Sonntag): {opt_err}")
+                    if notifier:
+                        notifier.send(f"⚠️ *Auto-Optimizer übersprungen*\n`{str(opt_err)[:150]}`\nNächster Versuch in 7 Tagen.")
 
             # Mitternacht-Reset
             if datetime.now().date() != today:

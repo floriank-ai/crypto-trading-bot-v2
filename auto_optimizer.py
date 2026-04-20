@@ -184,9 +184,21 @@ def run(notifier=None) -> list[str]:
 
     symbols = get_testable_symbols()
 
-    # Binance einmal laden und wiederverwenden (spart Zeit)
+    # Binance einmal laden und wiederverwenden (spart Zeit).
+    # Railway-IP ist bei Binance oft geblockt (HTTP 451) → sofort sauber abbrechen
+    # und State speichern, damit nicht jeder Cycle den Optimizer neu triggert.
     binance = ccxt.binance({"enableRateLimit": True})
-    binance.load_markets()
+    try:
+        binance.load_markets()
+    except Exception as e:
+        print(f"  [Optimizer] Binance nicht erreichbar (Geo-Block?): {e}")
+        # State mit last_run=jetzt speichern damit erst nächste Woche wieder versucht wird
+        state["last_run"] = datetime.now().isoformat()
+        state["last_error"] = str(e)[:200]
+        save_state(state)
+        if notifier:
+            notifier.send(f"⚠️ *Optimizer übersprungen*\nBinance blockt Railway-IP (451).\nNächster Versuch in 7 Tagen.")
+        return state.get("priority_list", [])
 
     for symbol in symbols:
         print(f"  [Optimizer] {symbol}...", end=" ", flush=True)
