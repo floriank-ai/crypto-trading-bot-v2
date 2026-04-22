@@ -173,42 +173,66 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
             print(f"  Claude analysis error: {e}")
             return {}
 
+    # Gemini-Modell-Fallback-Chain: wenn eins ueberlastet ist (503) oder rate-
+    # limited (429) wird das naechste probiert. Alle drei sind im Free-Tier.
+    _GEMINI_MODELS = [
+        "gemini-2.5-flash",       # primary — beste Qualitaet
+        "gemini-2.5-flash-lite",  # lighter, weniger ueberlastet
+        "gemini-2.0-flash",       # aeltere Gen, fast immer verfuegbar
+    ]
+    _GEMINI_RETRY_CODES = {429, 500, 502, 503, 504}
+
     def _analyze_with_gemini(self, headlines: list[str]) -> dict[str, dict] | None:
-        """Use Gemini 1.5 Flash (kostenloser Tier, 15 req/min).
-        Returns None bei API-/Rate-Limit-Fehler (triggert Claude-Fallback einmalig)."""
-        try:
-            response = requests.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                "gemini-2.5-flash:generateContent",
-                params={"key": Config.GEMINI_API_KEY},
-                headers={"content-type": "application/json"},
-                json={
-                    "contents": [{"parts": [{"text": self._build_prompt(headlines)}]}],
-                    "generationConfig": {"maxOutputTokens": 500, "temperature": 0.2},
-                },
-                timeout=30,
-            )
-            if response.status_code != 200:
+        """Use Gemini Flash (free tier). Modell-Fallback-Chain bei 503/429.
+        Returns None wenn alle Modelle scheitern (triggert Claude-Fallback)."""
+        prompt = self._build_prompt(headlines)
+        last_err = None
+
+        for model in self._GEMINI_MODELS:
+            try:
+                response = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model}:generateContent",
+                    params={"key": Config.GEMINI_API_KEY},
+                    headers={"content-type": "application/json"},
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {"maxOutputTokens": 500, "temperature": 0.2},
+                    },
+                    timeout=30,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        print(f"  Gemini ({model}): keine Antwort (blocked/empty)")
+                        return {}
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    text = "".join(p.get("text", "") for p in parts).strip()
+                    if not text or text.upper() == "NONE":
+                        print(f"  No strong news signals (Gemini/{model})")
+                        return {}
+                    if model != self._GEMINI_MODELS[0]:
+                        print(f"  Gemini Fallback-Modell {model} erfolgreich")
+                    return self._parse_signals(text)
+
+                if response.status_code in self._GEMINI_RETRY_CODES:
+                    last_err = f"{response.status_code} {response.text[:120]}"
+                    print(f"  Gemini {model} ueberlastet ({response.status_code}) — probiere naechstes Modell")
+                    continue  # naechstes Modell in der Chain
+
+                # Nicht-retrybarer Fehler (400/401/403/404) → sofort abbrechen
                 print(f"  Gemini API {response.status_code} — {response.text[:200]}")
-                return None  # Signal zur Provider-Chain: Claude-Fallback probieren
+                return None
 
-            data = response.json()
-            candidates = data.get("candidates", [])
-            if not candidates:
-                print("  Gemini: keine Antwort (blocked/empty)")
-                return {}
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts).strip()
+            except Exception as e:
+                last_err = str(e)
+                print(f"  Gemini {model} exception: {e}")
+                continue
 
-            if not text or text.upper() == "NONE":
-                print("  No strong news signals (Gemini)")
-                return {}
-
-            return self._parse_signals(text)
-
-        except Exception as e:
-            print(f"  Gemini analysis error: {e}")
-            return None
+        print(f"  Alle Gemini-Modelle gescheitert — letzter Fehler: {last_err}")
+        return None
 
     def _parse_signals(self, text: str) -> dict[str, dict]:
         """Parse Claude's response into trading signals."""
