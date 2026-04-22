@@ -25,6 +25,9 @@ class Config:
     # Globaler Cap eher großzügig — echte Risikosteuerung macht der Korrelations-Cap
     # (max 3 LONG + 3 SHORT in risk_manager.py). Zusätzlich Gainer-Slot + DCA/Grid.
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
+    # Anti-Churn: max N Trades pro Symbol pro Tag. Verhindert Whipsaw wie bei
+    # M/EUR (21.04.: 7 Einstiege/Ausstiege, ~14 EUR Fees, netto -X). Reset Mitternacht.
+    MAX_TRADES_PER_SYMBOL_PER_DAY = int(os.getenv("MAX_TRADES_PER_SYMBOL_PER_DAY", 3))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 

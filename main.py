@@ -385,6 +385,8 @@ def run_bot():
     # damit CHIP-artige Pumps gepingt werden auch wenn Kraken nichts listet
     alerted_mega_gainers = {}
     last_mega_scan_ts = 0.0  # Mega-Scan max. alle 5min (KuCoin fetch_tickers ist teuer)
+    # Anti-Churn: {symbol: count_heute} — verhindert Whipsaw (>3 Trades/Coin/Tag)
+    trades_today_by_symbol = {}
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
@@ -443,14 +445,24 @@ def run_bot():
                     if notifier:
                         notifier.send(f"⚠️ *Auto-Optimizer übersprungen*\n`{str(opt_err)[:150]}`\nNächster Versuch in 7 Tagen.")
 
-            # Mitternacht-Reset
+            # Mitternacht-Reset — mit HWM-Amnesie-Schutz:
+            # Steigt Portfolio ueber gestrigen Start -> Gewinn sichern, neuer Start.
+            # Faellt Portfolio darunter -> Start NICHT senken (Schaden bleibt sichtbar,
+            # sonst wird -5% Kill-Switch nutzlos, weil er jeden Tag neu nach unten
+            # gedehnt wuerde). Peak ebenfalls NICHT zuruecksetzen - all-time HWM
+            # ist Referenz fuer Floor-Lock und 3% Drawdown-Schutz.
             if datetime.now().date() != today:
                 today = datetime.now().date()
-                risk_mgr.daily_start_value = portfolio_val
-                peak_portfolio = portfolio_val
-                tageslimit_alerted_today = False  # Reset fuer neuen Tag
-                print(f"  🌅 Neuer Tag — Tages-Zähler zurückgesetzt auf {portfolio_val:.2f}EUR")
-                notifier.send(f"🌅 Neuer Tag\nNeuer Startpunkt: {portfolio_val:.2f}EUR")
+                prev_start = risk_mgr.daily_start_value
+                if portfolio_val >= prev_start:
+                    risk_mgr.daily_start_value = portfolio_val
+                    start_msg = f"neuer Start: {portfolio_val:.2f}EUR (+{(portfolio_val/prev_start-1)*100:.2f}% gestern)"
+                else:
+                    start_msg = f"Start bleibt: {prev_start:.2f}EUR (Portfolio {portfolio_val:.2f} darunter)"
+                trades_today_by_symbol = {}  # Per-Symbol-Churn-Counter reset
+                tageslimit_alerted_today = False
+                print(f"  🌅 Neuer Tag — {start_msg} | Peak: {peak_portfolio:.2f}EUR")
+                notifier.send(f"🌅 *Neuer Tag*\n{start_msg}\nPeak: `{peak_portfolio:.2f}EUR`")
 
             # Peak-Tracking zuerst (vor TAGESLIMIT, damit Floor nachgezogen werden kann)
             if portfolio_val > peak_portfolio:
@@ -917,6 +929,12 @@ def run_bot():
                         print(f"    Skip {symbol}: Strategie {strat} pausiert (Kill-Switch, {mins_left}m)")
                         continue
 
+                    # Anti-Churn: max N Trades pro Symbol pro Tag
+                    sym_trades_today = trades_today_by_symbol.get(symbol, 0)
+                    if sym_trades_today >= Config.MAX_TRADES_PER_SYMBOL_PER_DAY:
+                        print(f"    Skip {symbol}: Churn-Cap erreicht ({sym_trades_today}/{Config.MAX_TRADES_PER_SYMBOL_PER_DAY} Trades heute)")
+                        continue
+
                     regime_exempt = strat in ("gainer", "dca", "grid")
                     if not regime_exempt:
                         if direction == "long" and not allow_long_entries:
@@ -963,6 +981,9 @@ def run_bot():
                                                drawdown_pct=drawdown_from_peak)
                     if traded:
                         recently_traded[symbol] = time.time()
+                        trades_today_by_symbol[symbol] = trades_today_by_symbol.get(symbol, 0) + 1
+                        if trades_today_by_symbol[symbol] >= Config.MAX_TRADES_PER_SYMBOL_PER_DAY:
+                            print(f"    [Churn] {symbol} hat Tages-Cap erreicht ({trades_today_by_symbol[symbol]}/{Config.MAX_TRADES_PER_SYMBOL_PER_DAY}) — blockiert bis Mitternacht")
                     if weakest:
                         recently_traded[weakest] = time.time()
 
