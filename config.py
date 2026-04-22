@@ -9,8 +9,10 @@ class Config:
     KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "")
     KRAKEN_API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 
-    # Claude API
+    # Claude API (primary fuer Sentiment-Analyse)
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+    # Gemini API (fallback wenn Claude-Credit leer/401 — kostenloser Tier)
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
     # Trading
     TRADING_MODE = os.getenv("TRADING_MODE", "paper")

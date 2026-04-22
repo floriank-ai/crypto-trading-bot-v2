@@ -43,16 +43,31 @@ class NewsSentimentAnalyzer:
         self.last_check = 0
         self.last_headlines = []
         self.signals = {}  # symbol -> signal
-        self.has_api_key = bool(Config.ANTHROPIC_API_KEY)
+        # Provider-Chain: Claude bevorzugt, Gemini als Fallback wenn
+        # Claude-Credit leer ist (401/429/402/529 → Runtime-Switch).
+        self.has_claude = bool(Config.ANTHROPIC_API_KEY)
+        self.has_gemini = bool(Config.GEMINI_API_KEY)
+        self.claude_disabled = False  # wird bei Credit-Fehler zur Laufzeit gesetzt
+        self.active_provider = self._pick_provider()
 
-        if not self.has_api_key:
-            print("  News sentiment: disabled (no ANTHROPIC_API_KEY)")
+        if self.active_provider == "none":
+            print("  News sentiment: disabled (kein ANTHROPIC_API_KEY und kein GEMINI_API_KEY)")
         else:
-            print("  News sentiment: enabled")
+            print(f"  News sentiment: enabled via {self.active_provider.upper()}"
+                  f"{' (Gemini als Fallback bereit)' if self.has_gemini and self.active_provider == 'claude' else ''}")
+
+    def _pick_provider(self) -> str:
+        """Waehlt aktiven Provider. Claude > Gemini > none."""
+        if self.has_claude and not self.claude_disabled:
+            return "claude"
+        if self.has_gemini:
+            return "gemini"
+        return "none"
 
     def check_news(self) -> dict[str, dict]:
         """Fetch news and analyze sentiment. Returns signals per symbol."""
-        if not self.has_api_key:
+        provider = self._pick_provider()
+        if provider == "none":
             return {}
 
         now = time.time()
@@ -66,9 +81,20 @@ class NewsSentimentAnalyzer:
             return self.signals
 
         self.last_headlines = headlines
-        print(f"\n  Analyzing {len(headlines)} news headlines with Claude...")
+        print(f"\n  Analyzing {len(headlines)} news headlines with {provider.upper()}...")
 
-        self.signals = self._analyze_with_claude(headlines)
+        if provider == "claude":
+            result = self._analyze_with_claude(headlines)
+            # Claude hat aufgegeben -> Gemini probieren (falls vorhanden)
+            if result is None and self.has_gemini:
+                print("  Claude nicht verfuegbar -> Fallback auf Gemini")
+                self.claude_disabled = True
+                self.active_provider = "gemini"
+                result = self._analyze_with_gemini(headlines)
+        else:
+            result = self._analyze_with_gemini(headlines)
+
+        self.signals = result or {}
         return self.signals
 
     def _fetch_headlines(self) -> list[str]:
@@ -86,12 +112,9 @@ class NewsSentimentAnalyzer:
                 continue
         return headlines[:20]
 
-    def _analyze_with_claude(self, headlines: list[str]) -> dict[str, dict]:
-        """Use Claude API to analyze news sentiment for specific coins."""
-        try:
-            news_text = "\n".join(f"- {h}" for h in headlines)
-
-            prompt = f"""Analyze these crypto news headlines for trading signals.
+    def _build_prompt(self, headlines: list[str]) -> str:
+        news_text = "\n".join(f"- {h}" for h in headlines)
+        return f"""Analyze these crypto news headlines for trading signals.
 For each cryptocurrency mentioned, give a sentiment score from -10 (very bearish) to +10 (very bullish).
 Only include coins where the news strongly suggests a price movement.
 
@@ -107,6 +130,12 @@ BTC|-3|Regulatory concerns in EU
 
 Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, respond with: NONE"""
 
+    # Credit-/Auth-Fehler die zum Provider-Wechsel fuehren sollen
+    _CREDIT_ERROR_CODES = {401, 402, 403, 429, 529}
+
+    def _analyze_with_claude(self, headlines: list[str]) -> dict[str, dict] | None:
+        """Use Claude API. Returns None bei Credit/Auth-Fehler (triggert Gemini-Fallback)."""
+        try:
             response = requests.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -117,11 +146,14 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
                 json={
                     "model": "claude-sonnet-4-20250514",
                     "max_tokens": 500,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [{"role": "user", "content": self._build_prompt(headlines)}],
                 },
                 timeout=30,
             )
 
+            if response.status_code in self._CREDIT_ERROR_CODES:
+                print(f"  Claude API {response.status_code} (Credit/Auth) — Fallback erwuenscht")
+                return None  # Signal zur Provider-Chain: nimm Gemini
             if response.status_code != 200:
                 print(f"  Claude API error: {response.status_code}")
                 return {}
@@ -137,6 +169,42 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
 
         except Exception as e:
             print(f"  Claude analysis error: {e}")
+            return {}
+
+    def _analyze_with_gemini(self, headlines: list[str]) -> dict[str, dict]:
+        """Use Gemini 1.5 Flash (kostenloser Tier, 15 req/min)."""
+        try:
+            response = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                "gemini-1.5-flash:generateContent",
+                params={"key": Config.GEMINI_API_KEY},
+                headers={"content-type": "application/json"},
+                json={
+                    "contents": [{"parts": [{"text": self._build_prompt(headlines)}]}],
+                    "generationConfig": {"maxOutputTokens": 500, "temperature": 0.2},
+                },
+                timeout=30,
+            )
+            if response.status_code != 200:
+                print(f"  Gemini API error: {response.status_code} — {response.text[:200]}")
+                return {}
+
+            data = response.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                print("  Gemini: keine Antwort (blocked/empty)")
+                return {}
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts).strip()
+
+            if not text or text.upper() == "NONE":
+                print("  No strong news signals (Gemini)")
+                return {}
+
+            return self._parse_signals(text)
+
+        except Exception as e:
+            print(f"  Gemini analysis error: {e}")
             return {}
 
     def _parse_signals(self, text: str) -> dict[str, dict]:
