@@ -179,7 +179,7 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
         try:
             response = requests.post(
                 "https://generativelanguage.googleapis.com/v1beta/models/"
-                "gemini-1.5-flash:generateContent",
+                "gemini-2.5-flash:generateContent",
                 params={"key": Config.GEMINI_API_KEY},
                 headers={"content-type": "application/json"},
                 json={
