@@ -43,25 +43,27 @@ class NewsSentimentAnalyzer:
         self.last_check = 0
         self.last_headlines = []
         self.signals = {}  # symbol -> signal
-        # Provider-Chain: Claude bevorzugt, Gemini als Fallback wenn
-        # Claude-Credit leer ist (401/429/402/529 → Runtime-Switch).
+        # Provider-Chain: Gemini bevorzugt (Free-Tier = kostenlos), Claude
+        # nur als Fallback wenn Gemini gerade einen Fehler liefert
+        # (Rate-Limit, 5xx, etc). So kostet Normalbetrieb 0€.
         self.has_claude = bool(Config.ANTHROPIC_API_KEY)
         self.has_gemini = bool(Config.GEMINI_API_KEY)
-        self.claude_disabled = False  # wird bei Credit-Fehler zur Laufzeit gesetzt
         self.active_provider = self._pick_provider()
 
         if self.active_provider == "none":
-            print("  News sentiment: disabled (kein ANTHROPIC_API_KEY und kein GEMINI_API_KEY)")
+            print("  News sentiment: disabled (kein GEMINI_API_KEY und kein ANTHROPIC_API_KEY)")
         else:
-            print(f"  News sentiment: enabled via {self.active_provider.upper()}"
-                  f"{' (Gemini als Fallback bereit)' if self.has_gemini and self.active_provider == 'claude' else ''}")
+            fallback_note = ""
+            if self.active_provider == "gemini" and self.has_claude:
+                fallback_note = " (Claude als Notfall-Fallback bereit)"
+            print(f"  News sentiment: enabled via {self.active_provider.upper()}{fallback_note}")
 
     def _pick_provider(self) -> str:
-        """Waehlt aktiven Provider. Claude > Gemini > none."""
-        if self.has_claude and not self.claude_disabled:
-            return "claude"
+        """Waehlt aktiven Provider. Gemini > Claude > none (kostenlos first)."""
         if self.has_gemini:
             return "gemini"
+        if self.has_claude:
+            return "claude"
         return "none"
 
     def check_news(self) -> dict[str, dict]:
@@ -83,16 +85,16 @@ class NewsSentimentAnalyzer:
         self.last_headlines = headlines
         print(f"\n  Analyzing {len(headlines)} news headlines with {provider.upper()}...")
 
-        if provider == "claude":
-            result = self._analyze_with_claude(headlines)
-            # Claude hat aufgegeben -> Gemini probieren (falls vorhanden)
-            if result is None and self.has_gemini:
-                print("  Claude nicht verfuegbar -> Fallback auf Gemini")
-                self.claude_disabled = True
-                self.active_provider = "gemini"
-                result = self._analyze_with_gemini(headlines)
-        else:
+        # Gemini bevorzugt (kostenlos). Nur bei Fehler Claude als Einmal-Fallback
+        # fuer diesen Call — nicht persistent, damit naechster Cycle wieder Gemini
+        # probiert (Free-Tier-Limits setzen sich jede Minute zurueck).
+        if provider == "gemini":
             result = self._analyze_with_gemini(headlines)
+            if result is None and self.has_claude:
+                print("  Gemini nicht verfuegbar -> Einmal-Fallback auf Claude")
+                result = self._analyze_with_claude(headlines)
+        else:
+            result = self._analyze_with_claude(headlines)
 
         self.signals = result or {}
         return self.signals
@@ -171,8 +173,9 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
             print(f"  Claude analysis error: {e}")
             return {}
 
-    def _analyze_with_gemini(self, headlines: list[str]) -> dict[str, dict]:
-        """Use Gemini 1.5 Flash (kostenloser Tier, 15 req/min)."""
+    def _analyze_with_gemini(self, headlines: list[str]) -> dict[str, dict] | None:
+        """Use Gemini 1.5 Flash (kostenloser Tier, 15 req/min).
+        Returns None bei API-/Rate-Limit-Fehler (triggert Claude-Fallback einmalig)."""
         try:
             response = requests.post(
                 "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -186,8 +189,8 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
                 timeout=30,
             )
             if response.status_code != 200:
-                print(f"  Gemini API error: {response.status_code} — {response.text[:200]}")
-                return {}
+                print(f"  Gemini API {response.status_code} — {response.text[:200]}")
+                return None  # Signal zur Provider-Chain: Claude-Fallback probieren
 
             data = response.json()
             candidates = data.get("candidates", [])
@@ -205,7 +208,7 @@ Only include scores >= 5 or <= -5 (strong signals only). If no strong signals, r
 
         except Exception as e:
             print(f"  Gemini analysis error: {e}")
-            return {}
+            return None
 
     def _parse_signals(self, text: str) -> dict[str, dict]:
         """Parse Claude's response into trading signals."""
