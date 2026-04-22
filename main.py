@@ -15,6 +15,7 @@ from config import Config
 from auto_optimizer import should_run_today, run as run_optimizer, load_state, save_state
 from exchange import Exchange
 from scanner import CoinScanner
+from gainer_scanner import GainerScanner
 from strategies import MomentumStrategy, GridStrategy, DCAStrategy, GainerStrategy, Signal
 from sentiment import NewsSentimentAnalyzer
 from risk_manager import RiskManager
@@ -285,6 +286,7 @@ def run_bot():
     # Initialize
     exchange = Exchange()
     scanner = CoinScanner(exchange)
+    mega_scanner = GainerScanner()  # KuCoin-weiter Scan fuer 100%+ Pumps (inkl. Nicht-Kraken-Coins)
     momentum = MomentumStrategy()
     grid = GridStrategy()
     dca = DCAStrategy()
@@ -379,6 +381,10 @@ def run_bot():
     paused_strategies = {}
     # Gainer-Alert Debounce: {symbol: unix_ts_alerted} — damit nicht jeder Cycle spammt
     alerted_gainers = {}
+    # Mega-Gainer (KuCoin-wide, >=100% 24h): eigener Debounce,
+    # damit CHIP-artige Pumps gepingt werden auch wenn Kraken nichts listet
+    alerted_mega_gainers = {}
+    last_mega_scan_ts = 0.0  # Mega-Scan max. alle 5min (KuCoin fetch_tickers ist teuer)
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
@@ -747,6 +753,44 @@ def run_bot():
                 print(f"\n  🚀 [Gainer-Alarm] {sym} +{gain:.0f}% → Telegram\n")
                 notifier.send(msg)
                 alerted_gainers[sym] = time.time()
+
+            # Mega-Gainer-Alarm: KuCoin-weiter Scan (alles, nicht nur Kraken-EUR),
+            # damit Pumps wie CHIP (+600%) gepingt werden selbst wenn Kraken sie
+            # nicht listet. Max alle 5 Minuten um KuCoin-API zu schonen.
+            mega_now = time.time()
+            if mega_now - last_mega_scan_ts >= 300:
+                last_mega_scan_ts = mega_now
+                mega_cutoff = mega_now - Config.MEGA_GAINER_DEBOUNCE_HOURS * 3600
+                for k, ts in list(alerted_mega_gainers.items()):
+                    if ts < mega_cutoff:
+                        del alerted_mega_gainers[k]
+                mega_hits = mega_scanner.get_mega_gainers(
+                    min_gain_pct=Config.MEGA_GAINER_THRESHOLD,
+                    min_volume_usdt=Config.MEGA_GAINER_MIN_VOL_USDT,
+                )
+                if mega_hits:
+                    print(f"  🔥 [Mega-Gainer] {len(mega_hits)} Coin(s) >= +{Config.MEGA_GAINER_THRESHOLD:.0f}% 24h auf KuCoin")
+                for hit in mega_hits:
+                    key = hit["symbol"]
+                    if key in alerted_mega_gainers:
+                        continue
+                    base = hit["base"]
+                    gain = hit["gain_24h"]
+                    price_usdt = hit["price"]
+                    vol_usdt = hit["volume_usdt"]
+                    tradeable = exchange.has_eur_pair(base)
+                    if tradeable:
+                        trade_line = f"✅ Kraken {base}/EUR verfuegbar — Bot kann einsteigen"
+                    else:
+                        trade_line = f"❌ Nicht auf Kraken — nur Info (manuell z.B. KuCoin/Binance)"
+                    msg = (f"🔥 *MEGA-GAINER*: `{key}`\n"
+                           f"24h: *+{gain:.0f}%*\n"
+                           f"Preis: `{price_usdt:.6f} USDT`\n"
+                           f"Volumen: `{vol_usdt:,} USDT`\n"
+                           f"{trade_line}")
+                    print(f"  🔥 [Mega-Gainer] {key} +{gain:.0f}% (Kraken: {'yes' if tradeable else 'no'}) → Telegram")
+                    notifier.send(msg)
+                    alerted_mega_gainers[key] = mega_now
 
             # Slot-Filling: Top-N Gainer fuer freie Slots
             if not gainer_slot_occupied:

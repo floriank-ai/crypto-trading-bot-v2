@@ -51,6 +51,13 @@ class Config:
     GAINER_ALERT_THRESHOLD = float(os.getenv("GAINER_ALERT_THRESHOLD", 50.0))
     GAINER_ALERT_DEBOUNCE_HOURS = float(os.getenv("GAINER_ALERT_DEBOUNCE_HOURS", 4.0))
 
+    # Mega-Gainer-Alarm: scannt ALLE KuCoin-USDT-Paare (nicht nur Kraken-EUR),
+    # damit auch Coins wie CHIP/PEPE-Klone ueber Telegram gepingt werden, selbst
+    # wenn Kraken sie nicht listet. Inklusive Kraken-Tradeability-Check.
+    MEGA_GAINER_THRESHOLD = float(os.getenv("MEGA_GAINER_THRESHOLD", 100.0))
+    MEGA_GAINER_MIN_VOL_USDT = float(os.getenv("MEGA_GAINER_MIN_VOL_USDT", 500_000))
+    MEGA_GAINER_DEBOUNCE_HOURS = float(os.getenv("MEGA_GAINER_DEBOUNCE_HOURS", 6.0))
+
     # Grid
     GRID_LEVELS = int(os.getenv("GRID_LEVELS", 10))
     GRID_SPREAD_PCT = float(os.getenv("GRID_SPREAD_PCT", 0.04))

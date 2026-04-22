@@ -72,6 +72,37 @@ class GainerScanner:
             print(f"  [GainerScanner] Error: {e}")
             return []
 
+    def get_mega_gainers(self, min_gain_pct: float = 100.0,
+                         min_volume_usdt: float = 500_000) -> list[dict]:
+        """
+        Returns ALL USDT pairs with >= min_gain_pct 24h gain (no 1h trend filter,
+        no max_results cap). Used for the Mega-Gainer-Alarm — we WANT to know
+        about every 100%+ pump on KuCoin, not just actionable ones.
+        """
+        try:
+            self._ensure_markets()
+            tickers = self.binance.fetch_tickers()
+            hits = []
+            for symbol, t in tickers.items():
+                if not symbol.endswith("/USDT"):
+                    continue
+                pct = t.get("percentage") or 0
+                vol = t.get("quoteVolume") or 0
+                last = t.get("last") or 0
+                if pct >= min_gain_pct and vol >= min_volume_usdt and last > 0:
+                    hits.append({
+                        "symbol": symbol,
+                        "base": symbol.split("/")[0],
+                        "gain_24h": round(pct, 2),
+                        "volume_usdt": int(vol),
+                        "price": last,
+                    })
+            hits.sort(key=lambda x: x["gain_24h"], reverse=True)
+            return hits
+        except Exception as e:
+            print(f"  [MegaGainer] Error: {e}")
+            return []
+
     def _get_1h_trend(self, symbol: str) -> float:
         """1h momentum: positive = still going up, negative = peaked."""
         try:

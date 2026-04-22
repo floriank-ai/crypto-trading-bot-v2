@@ -69,6 +69,23 @@ class Exchange:
                 pairs.append(symbol)
         return sorted(pairs)
 
+    def has_eur_pair(self, base: str) -> bool:
+        """
+        Checks whether Kraken lists BASE/EUR as an active market.
+        Used by the Mega-Gainer-Alarm to tell dir, ob der Bot den Coin
+        ueberhaupt handeln koennte (Kraken Paper/Live) oder ob es
+        reine Info ist.
+        """
+        try:
+            self._ensure_markets()
+            sym = f"{base}/EUR"
+            market = self.exchange.markets.get(sym)
+            if not market:
+                return False
+            return bool(market.get("active", True))
+        except Exception:
+            return False
+
     def get_ohlcv(self, symbol: str, timeframe: str = "15m", limit: int = 100) -> pd.DataFrame:
         """Fetch OHLCV candle data."""
         try:
