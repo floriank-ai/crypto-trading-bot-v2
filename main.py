@@ -341,6 +341,75 @@ def run_bot():
         notifier.send("\n".join(lines))
     notifier.set_status_callback(send_status)
 
+    # Cooldown/Churn-State fruh initialisieren (damit do_reset() sie clearen kann)
+    recently_traded = {}          # symbol -> ts, 30min Cooldown nach Trade
+    last_sl_time = {}             # symbol -> ts, 6h Cooldown nach Stop-Loss
+    trades_today_by_symbol = {}   # symbol -> count, Churn-Cap (3/Tag)
+
+    # /reset confirm Telegram-Command: Paper-Balance auf INITIAL_CAPITAL zuruecksetzen.
+    # Einmaliger Reset — bei naechstem Deploy laeuft es mit dem neuen Stand weiter
+    # (keine ENV-Variable RESET_PAPER_BALANCE noetig). Fuer klassischen Start-over.
+    def do_reset():
+        try:
+            exchange._reset_paper_state()
+            risk_mgr.open_positions.clear()
+            risk_mgr.daily_start_value = Config.INITIAL_CAPITAL
+            if hasattr(risk_mgr, "peak_portfolio_value"):
+                risk_mgr.peak_portfolio_value = Config.INITIAL_CAPITAL
+            # Trade-Counter zuruecksetzen (Churn-Cap, Post-SL-Cooldown)
+            recently_traded.clear()
+            last_sl_time.clear()
+            trades_today_by_symbol.clear()
+            print(f"\n  🔄 [Telegram-Reset] Paper-Portfolio zurueckgesetzt auf {Config.INITIAL_CAPITAL:.2f}EUR\n")
+            return Config.INITIAL_CAPITAL
+        except Exception as e:
+            print(f"  [Telegram-Reset] Fehler: {e}")
+            return None
+    notifier.set_reset_callback(do_reset)
+
+    # /closeall confirm Telegram-Command: alle offenen Positionen zum Markt schliessen.
+    # Jede Position wird regulaer verkauft → realisierter P&L in trades.json,
+    # Balance bleibt erhalten. Nach /closeall kann man optional /reset senden
+    # fuer einen komplett sauberen Neustart.
+    def do_closeall():
+        try:
+            results = []
+            for symbol in list(risk_mgr.open_positions.keys()):
+                pos = risk_mgr.open_positions[symbol]
+                ticker = exchange.get_ticker(symbol)
+                if not ticker or not ticker.get("last"):
+                    print(f"  [Closeall] {symbol}: kein Preis — skip")
+                    continue
+                direction = pos.get("direction", "long")
+                close_side = "buy" if direction == "short" else "sell"
+                res = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
+                if res["status"] != "ok":
+                    print(f"  [Closeall] {symbol}: Order-Fehler — {res.get('error', '?')}")
+                    continue
+                cp = res.get("price", ticker["last"])
+                cost = res.get("cost", pos["volume"] * cp)
+                fee = res.get("fee", cost * 0.0026)
+                if direction == "short":
+                    pnl = (pos["entry_price"] - cp) * pos["volume"] - 2 * fee
+                    log_side = "cover"
+                else:
+                    pnl = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
+                    log_side = "sell"
+                logger.log_trade(pair=symbol, side=log_side, volume=pos["volume"],
+                                 price=cp, cost=cost, fee=fee,
+                                 mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                 signal_reason="telegram_closeall",
+                                 balance_after=exchange.get_balance(), realized_pnl=pnl)
+                risk_mgr.close_position(symbol)
+                results.append({"symbol": symbol, "pnl": pnl,
+                                "strategy": pos.get("strategy", "?")})
+                print(f"  [Closeall] {symbol} geschlossen: P&L {pnl:+.2f}EUR")
+            return results
+        except Exception as e:
+            print(f"  [Telegram-Closeall] Fehler: {e}")
+            return None
+    notifier.set_closeall_callback(do_closeall)
+
     # Echten Portfoliowert als Startpunkt setzen (nicht INITIAL_CAPITAL)
     # Verhindert Reset des Tages-P&L nach Neustart
     actual_portfolio = risk_mgr.get_portfolio_value(exchange)
@@ -375,8 +444,8 @@ def run_bot():
                 print(f"    {sym} geschlossen: P&L {pnl:+.2f}EUR")
         print(f"  [Cleanup] Fertig — Cash: {exchange.get_balance():.2f}EUR")
 
-    recently_traded = {}  # symbol -> timestamp, Cooldown nach Rotation
-    last_sl_time = {}     # symbol -> timestamp, Post-SL-Cooldown (6h, Config.POST_SL_COOLDOWN_HOURS)
+    # (recently_traded, last_sl_time, trades_today_by_symbol wurden bereits oben
+    # initialisiert — vor do_reset() — damit der Telegram-Reset sie clearen kann)
 
     active = Config.ACTIVE_STRATEGIES
     print(f"\n  Active strategies: {', '.join(active)}")
@@ -403,8 +472,8 @@ def run_bot():
     # damit CHIP-artige Pumps gepingt werden auch wenn Kraken nichts listet
     alerted_mega_gainers = {}
     last_mega_scan_ts = 0.0  # Mega-Scan max. alle 5min (KuCoin fetch_tickers ist teuer)
-    # Anti-Churn: {symbol: count_heute} — verhindert Whipsaw (>3 Trades/Coin/Tag)
-    trades_today_by_symbol = {}
+    # Anti-Churn: {symbol: count_heute} — bereits oben als leer initialisiert,
+    # damit do_reset() sie clearen kann. Hier nur als Marker-Kommentar.
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
 
