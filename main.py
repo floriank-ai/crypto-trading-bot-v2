@@ -198,8 +198,12 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
         return False
 
 
-def check_exits(exchange, risk_manager, logger, notifier):
-    """Check all open positions for partial-TP, stop-loss, take-profit."""
+def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None):
+    """Check all open positions for partial-TP, stop-loss, take-profit.
+
+    last_sl_time: dict symbol->timestamp; bei STOP_LOSS gesetzt. Main-Loop nutzt
+    das fuer Post-SL-Cooldown (6h) damit wir nicht wie mit SPK 4x in Folge kaufen.
+    """
     exits = []
     for symbol in list(risk_manager.open_positions.keys()):
         pos = risk_manager.open_positions[symbol]
@@ -276,6 +280,10 @@ def check_exits(exchange, risk_manager, logger, notifier):
                 d_pnl = risk_manager.get_daily_pnl_pct(exchange)
                 notifier.notify_exit(symbol, exit_type, pnl, pos["strategy"], port_val, d_pnl)
                 exits.append((symbol, exit_type, pnl))
+                # Post-SL-Cooldown: Symbol wird fuer POST_SL_COOLDOWN_HOURS gesperrt.
+                # Verhindert SPK-Szenario (4x gekauft, 3x stop-geloss't, -21EUR).
+                if exit_type == "stop_loss" and last_sl_time is not None:
+                    last_sl_time[symbol] = time.time()
 
     return exits
 
@@ -368,6 +376,7 @@ def run_bot():
         print(f"  [Cleanup] Fertig — Cash: {exchange.get_balance():.2f}EUR")
 
     recently_traded = {}  # symbol -> timestamp, Cooldown nach Rotation
+    last_sl_time = {}     # symbol -> timestamp, Post-SL-Cooldown (6h, Config.POST_SL_COOLDOWN_HOURS)
 
     active = Config.ACTIVE_STRATEGIES
     print(f"\n  Active strategies: {', '.join(active)}")
@@ -726,7 +735,7 @@ def run_bot():
                 print(f"  ⚠️  VERLUSTBREMSE aktiv ({daily_pnl:.2f}%) — nur Shorts erlaubt")
 
             # 1. Check exits first
-            exits = check_exits(exchange, risk_mgr, logger, notifier)
+            exits = check_exits(exchange, risk_mgr, logger, notifier, last_sl_time=last_sl_time)
             for sym, etype, pnl in exits:
                 print(f"    Exited {sym}: {etype} P&L {pnl:+.2f}EUR")
 
@@ -854,6 +863,20 @@ def run_bot():
                     if sym not in target_symbols:
                         target_symbols.append(sym)
 
+            # Nacht-Modus-Check: zwischen NIGHT_START_UTC und NIGHT_END_UTC keine
+            # neuen Gainer-Entries (Lehre Log 23.04 02:51: SPK in 3min SL -7.32EUR).
+            # Nachts duenne Liquiditaet auf Kraken EUR, Slippage frisst den Edge.
+            utc_hour = datetime.utcnow().hour
+            night_start = Config.NIGHT_START_UTC
+            night_end = Config.NIGHT_END_UTC
+            if night_start > night_end:  # ueber Mitternacht (z.B. 20-06)
+                is_night = utc_hour >= night_start or utc_hour < night_end
+            else:
+                is_night = night_start <= utc_hour < night_end
+            night_mode_active = bool(Config.NIGHT_MODE_GAINER) and is_night
+            if night_mode_active:
+                print(f"  [Night-Mode] UTC {utc_hour:02d}:xx — Gainer-Entries pausiert (schlechte Liquiditaet)")
+
             # 4. Run strategies on each target
             for symbol in target_symbols:
                 if symbol in risk_mgr.open_positions:
@@ -863,6 +886,15 @@ def run_bot():
                 if symbol in recently_traded and (time.time() - recently_traded[symbol]) < cooldown_secs:
                     remaining = int((cooldown_secs - (time.time() - recently_traded[symbol])) / 60)
                     print(f"  {symbol} Cooldown noch {remaining}min")
+                    continue
+
+                # Post-SL-Cooldown: nach Stop-Loss 6h harte Pause fuer dieses Symbol.
+                # Log 22./23.04 SPK-Desaster: 4x gekauft trotz 3 SLs. Mit 6h-Cooldown
+                # waeren Kaeufe #2-#4 alle geblockt worden (+14EUR gespart).
+                sl_cooldown_secs = Config.POST_SL_COOLDOWN_HOURS * 3600
+                if symbol in last_sl_time and (time.time() - last_sl_time[symbol]) < sl_cooldown_secs:
+                    remaining_h = (sl_cooldown_secs - (time.time() - last_sl_time[symbol])) / 3600
+                    print(f"  {symbol} Post-SL-Cooldown noch {remaining_h:.1f}h (Stop-Loss vor {(time.time()-last_sl_time[symbol])/3600:.1f}h)")
                     continue
 
                 print(f"\n  Analyzing {symbol}...")
@@ -919,7 +951,8 @@ def run_bot():
                         print(f"    [sentiment] BUY: {sig['reason']}")
 
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
-                if not gainer_slot_occupied:
+                # Nacht-Modus (20-06 UTC): komplett aus, nachts zu duenne Liquiditaet.
+                if not gainer_slot_occupied and not night_mode_active:
                     coin_data = next((r for r in scan_results if r["symbol"] == symbol), None)
                     # Fallback: Discovery-Coin (z.B. MOVR) ist nicht in top-50 scan_results,
                     # aber in gainer_gain_lookup aus get_all_eur_pairs — sonst gain_24h=0

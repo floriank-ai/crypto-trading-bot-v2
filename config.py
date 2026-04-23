@@ -86,6 +86,20 @@ class Config:
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 60))
     NEWS_CHECK_INTERVAL = int(os.getenv("NEWS_CHECK_INTERVAL", 300))
 
+    # Post-SL-Cooldown: nach Stop-Loss auf einem Symbol X Stunden Pause.
+    # Lehre Log 22./23.04: SPK wurde 4x gekauft, 3 SLs in Folge = -21EUR.
+    # 30min recently_traded Cooldown war zu kurz — erster Re-Entry kam 47min
+    # nach SL. 6h = Pump ist sicher vorbei, Trend gebrochen.
+    POST_SL_COOLDOWN_HOURS = float(os.getenv("POST_SL_COOLDOWN_HOURS", 6.0))
+
+    # Nacht-Modus: zwischen NIGHT_START und NIGHT_END (UTC) keine neuen Gainer-Entries.
+    # Gainer sind nachts in Europa = US/Asien-Tradingzeit, Liquiditaet auf Kraken EUR
+    # niedriger, Slippage hoeher. Default 20:00-06:00 UTC = 22:00-08:00 CEST.
+    # Setze NIGHT_MODE_GAINER=0 um zu deaktivieren.
+    NIGHT_MODE_GAINER = int(os.getenv("NIGHT_MODE_GAINER", 1))
+    NIGHT_START_UTC = int(os.getenv("NIGHT_START_UTC", 20))  # 20:00 UTC = 22:00 CEST
+    NIGHT_END_UTC = int(os.getenv("NIGHT_END_UTC", 6))       # 06:00 UTC = 08:00 CEST
+
     # Telegram
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
