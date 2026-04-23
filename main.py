@@ -151,6 +151,30 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
         print(f"    [Gainer] Slot already occupied")
         return False
 
+    # Kraken-EUR-Liquidity-Gate (ersetzt alten Night-Mode-Zeitfilter).
+    # Pruefung direkt vor dem Order-Placement: 24h-Volume + Spread auf Kraken.
+    # KuCoin USDT kann fett sein, Kraken EUR trotzdem duenn — das ist der Kill-Switch.
+    try:
+        kraken_ticker = exchange.get_ticker(symbol)
+        vol_eur = float(kraken_ticker.get("volume", 0) or 0)
+        ask = float(kraken_ticker.get("ask", 0) or 0)
+        bid = float(kraken_ticker.get("bid", 0) or 0)
+        if vol_eur > 0 and vol_eur < Config.GAINER_MIN_KRAKEN_VOL_EUR:
+            print(f"    [Gainer] SKIP {symbol}: Kraken-24h-Vol {vol_eur:,.0f}EUR "
+                  f"< min {Config.GAINER_MIN_KRAKEN_VOL_EUR:,.0f}EUR (Orderbook zu duenn)")
+            return False
+        if ask > 0 and bid > 0:
+            mid = (ask + bid) / 2
+            spread_pct = (ask - bid) / mid * 100
+            if spread_pct > Config.GAINER_MAX_SPREAD_PCT:
+                print(f"    [Gainer] SKIP {symbol}: Spread {spread_pct:.2f}% "
+                      f"> max {Config.GAINER_MAX_SPREAD_PCT:.2f}% (Slippage frisst Edge)")
+                return False
+            print(f"    [Gainer] Liquidity OK: Vol {vol_eur:,.0f}EUR, Spread {spread_pct:.2f}%")
+    except Exception as e:
+        print(f"    [Gainer] Liquidity-Check Fehler {symbol}: {e} — skip zur Sicherheit")
+        return False
+
     # Anti-Martingale: Gainer slot also shrinks in drawdown
     if drawdown_pct >= 3.0:
         dd_scale = 0.4
@@ -932,20 +956,10 @@ def run_bot():
                     if sym not in target_symbols:
                         target_symbols.append(sym)
 
-            # Nacht-Modus-Check: zwischen NIGHT_START_UTC und NIGHT_END_UTC keine
-            # neuen Gainer-Entries (Lehre Log 23.04 02:51: SPK in 3min SL -7.32EUR).
-            # Nachts duenne Liquiditaet auf Kraken EUR, Slippage frisst den Edge.
-            # datetime.now(timezone.utc) statt deprecated utcnow() (Python 3.12+).
-            utc_hour = datetime.now(timezone.utc).hour
-            night_start = Config.NIGHT_START_UTC
-            night_end = Config.NIGHT_END_UTC
-            if night_start > night_end:  # ueber Mitternacht (z.B. 20-06)
-                is_night = utc_hour >= night_start or utc_hour < night_end
-            else:
-                is_night = night_start <= utc_hour < night_end
-            night_mode_active = bool(Config.NIGHT_MODE_GAINER) and is_night
-            if night_mode_active:
-                print(f"  [Night-Mode] UTC {utc_hour:02d}:xx — Gainer-Entries pausiert (schlechte Liquiditaet)")
+            # Kein Zeit-Filter mehr — Gainer duerfen 24/7 feuern.
+            # Schutz statt Uhrzeit: Liquidity-Gate in execute_gainer_trade prueft
+            # Kraken-EUR-Orderbook direkt (Volume + Spread). So bleiben legitime
+            # Asia-Pumps handelbar, duenne Orderbooks werden trotzdem geblockt.
 
             # 4. Run strategies on each target
             for symbol in target_symbols:
@@ -1021,8 +1035,8 @@ def run_bot():
                         print(f"    [sentiment] BUY: {sig['reason']}")
 
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
-                # Nacht-Modus (20-06 UTC): komplett aus, nachts zu duenne Liquiditaet.
-                if not gainer_slot_occupied and not night_mode_active:
+                # Kein Zeit-Filter mehr — Liquidity-Gate in execute_gainer_trade schuetzt stattdessen.
+                if not gainer_slot_occupied:
                     coin_data = next((r for r in scan_results if r["symbol"] == symbol), None)
                     # Fallback: Discovery-Coin (z.B. MOVR) ist nicht in top-50 scan_results,
                     # aber in gainer_gain_lookup aus get_all_eur_pairs — sonst gain_24h=0

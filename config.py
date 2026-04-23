@@ -92,13 +92,15 @@ class Config:
     # nach SL. 6h = Pump ist sicher vorbei, Trend gebrochen.
     POST_SL_COOLDOWN_HOURS = float(os.getenv("POST_SL_COOLDOWN_HOURS", 6.0))
 
-    # Nacht-Modus: zwischen NIGHT_START und NIGHT_END (UTC) keine neuen Gainer-Entries.
-    # Gainer sind nachts in Europa = US/Asien-Tradingzeit, Liquiditaet auf Kraken EUR
-    # niedriger, Slippage hoeher. Default 20:00-06:00 UTC = 22:00-08:00 CEST.
-    # Setze NIGHT_MODE_GAINER=0 um zu deaktivieren.
-    NIGHT_MODE_GAINER = int(os.getenv("NIGHT_MODE_GAINER", 1))
-    NIGHT_START_UTC = int(os.getenv("NIGHT_START_UTC", 20))  # 20:00 UTC = 22:00 CEST
-    NIGHT_END_UTC = int(os.getenv("NIGHT_END_UTC", 6))       # 06:00 UTC = 08:00 CEST
+    # Gainer-Liquiditaets-Gate auf KRAKEN EUR (nicht nur KuCoin USDT!).
+    # Ersetzt den alten Zeit-Filter (Night Mode) — der war zu stumpf, hat auch
+    # legitime Asia-Pumps geblockt. Stattdessen pruefen wir direkt ob der
+    # Kraken-EUR-Orderbook-Stand einen sauberen Entry erlaubt.
+    # 24h-Quote-Volume auf Kraken EUR muss >= diesem Wert sein.
+    GAINER_MIN_KRAKEN_VOL_EUR = float(os.getenv("GAINER_MIN_KRAKEN_VOL_EUR", 300_000))
+    # Max Spread (ask-bid)/mid in % — > diesem Wert = Orderbook zu duenn,
+    # Slippage frisst den Edge (typisch nachts auf Micro-Caps).
+    GAINER_MAX_SPREAD_PCT = float(os.getenv("GAINER_MAX_SPREAD_PCT", 0.5))
 
     # Telegram
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
