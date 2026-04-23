@@ -15,7 +15,7 @@ import os
 import time
 import ccxt
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
 from strategies import MomentumStrategy, Signal
 
@@ -96,7 +96,7 @@ def _fetch_binance(symbol: str, months: int, binance_exchange=None) -> pd.DataFr
             b.load_markets()
         if binance_sym not in b.symbols:
             return pd.DataFrame()
-        since = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp() * 1000)
+        since = int((datetime.now(timezone.utc) - timedelta(days=months * 30)).timestamp() * 1000)
         rows = []
         while True:
             batch = b.fetch_ohlcv(binance_sym, "15m", since=since, limit=1000)

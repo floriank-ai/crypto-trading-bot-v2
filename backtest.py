@@ -17,7 +17,7 @@ import ccxt
 import requests
 import pandas as pd
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
 from strategies import MomentumStrategy, Signal
 import ta as ta_lib
@@ -71,7 +71,7 @@ def fetch_data_binance(symbol, months=3):
             print(f"    {binance_symbol} nicht auf Binance verfügbar")
             return pd.DataFrame()
 
-        since_ms = int((datetime.utcnow() - timedelta(days=months * 30)).timestamp() * 1000)
+        since_ms = int((datetime.now(timezone.utc) - timedelta(days=months * 30)).timestamp() * 1000)
 
         while len(all_rows) < total_candles:
             batch = binance.fetch_ohlcv(binance_symbol, "15m", since=since_ms, limit=1000)

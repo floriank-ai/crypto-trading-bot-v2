@@ -5,7 +5,7 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from config import Config
 
 
@@ -47,7 +47,7 @@ class AlpacaExchange:
             req = StockBarsRequest(
                 symbol_or_symbols=symbol,
                 timeframe=TimeFrame.Minute,
-                start=datetime.utcnow() - timedelta(minutes=5),
+                start=datetime.now(timezone.utc) - timedelta(minutes=5),
             )
             bars = self.data_client.get_stock_bars(req).df
             if bars.empty:
@@ -68,7 +68,7 @@ class AlpacaExchange:
             req = StockBarsRequest(
                 symbol_or_symbols=symbol,
                 timeframe=tf,
-                start=datetime.utcnow() - timedelta(minutes=minutes * limit),
+                start=datetime.now(timezone.utc) - timedelta(minutes=minutes * limit),
             )
             bars = self.data_client.get_stock_bars(req).df
 

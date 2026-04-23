@@ -9,7 +9,7 @@ Usage:
 import argparse
 import time
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config import Config
 from auto_optimizer import should_run_today, run as run_optimizer, load_state, save_state
@@ -935,7 +935,8 @@ def run_bot():
             # Nacht-Modus-Check: zwischen NIGHT_START_UTC und NIGHT_END_UTC keine
             # neuen Gainer-Entries (Lehre Log 23.04 02:51: SPK in 3min SL -7.32EUR).
             # Nachts duenne Liquiditaet auf Kraken EUR, Slippage frisst den Edge.
-            utc_hour = datetime.utcnow().hour
+            # datetime.now(timezone.utc) statt deprecated utcnow() (Python 3.12+).
+            utc_hour = datetime.now(timezone.utc).hour
             night_start = Config.NIGHT_START_UTC
             night_end = Config.NIGHT_END_UTC
             if night_start > night_end:  # ueber Mitternacht (z.B. 20-06)
