@@ -32,14 +32,14 @@ class MomentumStrategy:
         macd = ta.trend.MACD(close)
         macd_hist = macd.macd_diff().iloc[-1]
 
-        # ADX: nur bei echtem Trend handeln (> 20)
+        # ADX: only trade on a real trend (> 20)
         adx = ta.trend.ADXIndicator(high, low, close, window=14).adx()
         trending = adx.iloc[-1] > 20
 
         avg_vol = df["volume"].rolling(20).mean().iloc[-1] if len(df) >= 20 else 0
-        # Volumen-Filter zurueck auf 1.8x: 1.3x produzierte 4/4 Loser SHORTs auf
-        # Junk-Alts in BULLISH-Markt (Log 17.04, -20 EUR in 6h). False-Breakouts
-        # kamen zu billig durch. 1.8x = echte Conviction, weniger aber besser.
+        # Volume filter back to 1.8x: 1.3x produced 4/4 Loser SHORTs on
+        # junk alts in a BULLISH market (Log 17.04, -20 EUR in 6h). False breakouts
+        # came through too cheaply. 1.8x = real conviction, fewer but better.
         vol_spike = avg_vol > 0 and df["volume"].iloc[-1] > avg_vol * 1.8
 
         high_20 = close.rolling(20).max().iloc[-2] if len(df) >= 21 else 0
@@ -47,7 +47,7 @@ class MomentumStrategy:
         breakout  = close.iloc[-1] > high_20 and vol_spike
         breakdown = close.iloc[-1] < low_20  and vol_spike
 
-        # Bollinger Bands: filter overdehnte Einstiege
+        # Bollinger Bands: filter overstretched entries
         bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
         bb_upper  = bb.bollinger_hband().iloc[-1]
         bb_middle = bb.bollinger_mavg().iloc[-1]
@@ -59,31 +59,31 @@ class MomentumStrategy:
         leverage = 1
 
         if trending:
-            # Long: Breakout neues Hoch + Volumen
-            # Blockieren wenn >2% über oberem BB (überdehnt, False-Breakout-Risiko)
+            # Long: breakout new high + volume
+            # Block if >2% above upper BB (overstretched, false-breakout risk)
             if breakout and bullish and price_now <= bb_upper * 1.02:
                 signal = Signal.BUY
                 reasons = ["Breakout new high + volume spike"]
                 leverage = 2
 
-            # Long: RSI extrem oversold + EMA bullish + MACD positiv
-            # Zurueck auf 32 (war auf 38 gelockert -> zu frueh / niedrigere Quality).
-            # Nur kaufen wenn Preis noch unter/am BB-Mittelpunkt (wirklich günstig)
+            # Long: RSI extreme oversold + EMA bullish + MACD positive
+            # Back to 32 (was loosened to 38 -> too early / lower quality).
+            # Only buy when price is still below/at the BB midpoint (really cheap)
             elif current_rsi < 32 and bullish and macd_hist > 0 and price_now <= bb_middle:
                 signal = Signal.BUY
                 reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
                 leverage = 2
 
-            # Short: Breakdown neues Tief + Volumen
-            # Blockieren wenn >2% unter unterem BB (überdehnt, Bounce-Risiko)
+            # Short: breakdown new low + volume
+            # Block if >2% below lower BB (overstretched, bounce risk)
             elif breakdown and bearish and price_now >= bb_lower * 0.98:
                 signal = Signal.SELL
                 reasons = ["Breakdown new low + volume spike"]
                 leverage = 2
 
-            # Short: RSI extrem overbought + EMA bearish + MACD negativ
-            # Zurueck auf 68 (war auf 62 gelockert -> zu frueh / niedrigere Quality).
-            # Nur shorten wenn Preis noch über/am BB-Mittelpunkt
+            # Short: RSI extreme overbought + EMA bearish + MACD negative
+            # Back to 68 (was loosened to 62 -> too early / lower quality).
+            # Only short when price is still above/at the BB midpoint
             elif current_rsi > 68 and bearish and macd_hist < 0 and price_now >= bb_middle:
                 signal = Signal.SELL
                 reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
@@ -166,19 +166,33 @@ class GridStrategy:
 
 
 class GainerStrategy:
-    """Entry filter for top gainers: avoid buying at the absolute peak."""
+    """Entry filter for top gainers: avoid buying at the absolute peak.
+
+    Log 22.04.2026 learned: SPK +50% @ RSI 79 verlor -9.02EUR (86% des Tagesverlustes).
+    Klassisches "Buying the top". Fixes: Max-Gain-Cap 40%, RSI-Cap 72, green-candle-req.
+    """
 
     def analyze(self, df: pd.DataFrame, gain_24h: float = 0) -> dict:
         if df.empty or len(df) < 20:
             return {"signal": Signal.HOLD, "reason": "Not enough data", "strategy": "gainer"}
 
         close = df["close"]
+        open_ = df["open"]
 
-        # RSI: skip only if extremely overbought (>88 — gainer coins naturally have high RSI)
-        rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
-        if rsi > 88:
+        # Max-24h-Gain-Cap: >40% = Pump vermutlich gelaufen, Einstiegsrisiko zu hoch.
+        # SPK war +50% → sofort -9EUR verloren. NEIRO +38%, SPX +16% waren erfolgreich.
+        if gain_24h >= Config.GAINER_MAX_GAIN_24H:
             return {"signal": Signal.HOLD,
-                    "reason": f"RSI {rsi:.0f} extreme peak — skip",
+                    "reason": f"Gain +{gain_24h:.0f}% zu hoch (>={Config.GAINER_MAX_GAIN_24H:.0f}%) — Pump gelaufen",
+                    "strategy": "gainer"}
+
+        # RSI-Cap 72 (war 88): Gainer-Coins haben naturgemäß hohen RSI, aber >72 =
+        # overbought nach Standard-Definition. SPK RSI 79 → sofort gedumpt. NEIRO 60,
+        # SPX 54/49/58 → alle erfolgreich = sicherer Bereich.
+        rsi = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+        if rsi > Config.GAINER_RSI_MAX:
+            return {"signal": Signal.HOLD,
+                    "reason": f"RSI {rsi:.0f} overbought (>{Config.GAINER_RSI_MAX:.0f}) — top-buying-risk",
                     "strategy": "gainer"}
 
         # EMA trend: must be bullish
@@ -187,6 +201,15 @@ class GainerStrategy:
         if ema_f <= ema_s:
             return {"signal": Signal.HOLD,
                     "reason": "EMA not bullish",
+                    "strategy": "gainer"}
+
+        # Letzte 15m-Kerze muss grün sein — SPK war bereits im 15m-Rückfall als Bot kaufte.
+        # Grüne Kerze = Momentum aktuell positiv, nicht bereits am Umkehren.
+        last_close = close.iloc[-1]
+        last_open = open_.iloc[-1]
+        if last_close <= last_open:
+            return {"signal": Signal.HOLD,
+                    "reason": "Letzte 15m rot — Momentum dreht bereits",
                     "strategy": "gainer"}
 
         # Volume: must still have elevated volume (not fading)
@@ -198,7 +221,7 @@ class GainerStrategy:
 
         return {
             "signal": Signal.BUY,
-            "reason": f"Gainer +{gain_24h:.0f}% 24h | RSI {rsi:.0f} | EMA bullish | vol ok",
+            "reason": f"Gainer +{gain_24h:.0f}% 24h | RSI {rsi:.0f} | EMA bullish | 15m grün | vol ok",
             "rsi": round(rsi, 2),
             "price": round(close.iloc[-1], 8),
             "strategy": "gainer",

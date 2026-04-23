@@ -46,9 +46,13 @@ class Config:
     AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 10))
 
     # Gainer Slot (Binance top gainers)
-    GAINER_SLOT_PCT = float(os.getenv("GAINER_SLOT_PCT", 0.10))         # 10% of portfolio per trade
+    # WICHTIGE LEHRE 22.04.2026: SPK +50% RSI 79 → -9.02EUR in 20min. Entry-Filter
+    # gescharft: RSI-Cap 72 (von 88), Max-24h-Gain 40% (neu), SL 4% (von 6%).
+    GAINER_SLOT_PCT = float(os.getenv("GAINER_SLOT_PCT", 0.10))         # 10% of portfolio per trade (halbiert in Drawdown via main.py)
     GAINER_MIN_GAIN_24H = float(os.getenv("GAINER_MIN_GAIN_24H", 15.0)) # min 24h gain %
-    GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.06))             # stop loss 6%
+    GAINER_MAX_GAIN_24H = float(os.getenv("GAINER_MAX_GAIN_24H", 40.0)) # max 24h gain % — >40% = Pump gelaufen, nicht kaufen
+    GAINER_RSI_MAX = float(os.getenv("GAINER_RSI_MAX", 72.0))           # RSI-Cap — >72 = overbought, top-buying-Risiko
+    GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.04))             # stop loss 4% (was 6% — zu viel Slippage bei Micro-Caps)
     GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.12))             # take profit 12% (partial-TP + trail vorher)
     GAINER_SCAN_INTERVAL_MINUTES = int(os.getenv("GAINER_SCAN_INTERVAL_MINUTES", 15))
     # Telegram-Alarm ab diesem 24h-Gewinn (unabhaengig von Slot-Status — damit du

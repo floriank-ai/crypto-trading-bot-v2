@@ -37,22 +37,22 @@ def _restore_positions(risk_mgr, exchange):
     import json, os
     pos_path = os.path.join("logs", "positions.json")
     if not os.path.exists(pos_path):
-        print("  [Restore] Keine positions.json — Neustart ohne offene Positionen")
+        print("  [Restore] No positions.json — Restart without open positions")
         return
     try:
         with open(pos_path) as f:
             positions = json.load(f)
         if not positions:
-            print("  [Restore] positions.json leer — keine offenen Positionen")
+            print("  [Restore] positions.json empty — no open positions")
             return
-        # Nur Symbole wiederherstellen die auf Kraken (EUR-Pairs) verfügbar sind
+        # Only restore symbols that are available on Kraken (EUR pairs)
         valid_symbols = set(exchange.get_all_eur_pairs())
         skipped = []
         for sym, pos in positions.items():
             if sym not in valid_symbols:
                 skipped.append(sym)
                 continue
-            # Backwards-compat: Felder für Partial-TP nachziehen falls alte positions.json
+            # Backwards-compat: add Partial-TP fields if old positions.json
             pos.setdefault("initial_volume", pos["volume"])
             pos.setdefault("partial_tps_taken", [])
             risk_mgr.open_positions[sym] = pos
@@ -69,11 +69,11 @@ def _restore_positions(risk_mgr, exchange):
                 }
             print(f"    {sym} [{direction.upper()}] vol={pos['volume']:.6f} @ {pos['entry_price']:.4f} SL={pos['stop_loss']:.4f}")
         if skipped:
-            print(f"  [Restore] Übersprungen (nicht auf Kraken): {', '.join(skipped)}")
-            risk_mgr._save_positions()  # positions.json ohne ungültige Symbole überschreiben
-        print(f"  [Restore] {len(risk_mgr.open_positions)} Positionen wiederhergestellt")
+            print(f"  [Restore] Skipped (not on Kraken): {', '.join(skipped)}")
+            risk_mgr._save_positions()  # overwrite positions.json without invalid symbols
+        print(f"  [Restore] {len(risk_mgr.open_positions)} positions restored")
     except Exception as e:
-        print(f"  [Restore] Fehler: {e}")
+        print(f"  [Restore] Error: {e}")
         import traceback
         traceback.print_exc()
 
@@ -94,16 +94,16 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
                 print(f"    Skip: max positions ({risk_manager.max_positions}) reached")
             elif direction == "long" and sum(1 for p in risk_manager.open_positions.values()
                                              if p.get("direction", "long") == "long") >= risk_manager.MAX_LONG_POSITIONS:
-                print(f"    Skip: LONG-Cap erreicht (max {risk_manager.MAX_LONG_POSITIONS} Longs — Korrelations-Schutz)")
+                print(f"    Skip: LONG cap reached (max {risk_manager.MAX_LONG_POSITIONS} Longs — correlation guard)")
             elif direction == "short" and sum(1 for p in risk_manager.open_positions.values()
                                               if p.get("direction") == "short") >= risk_manager.MAX_SHORT_POSITIONS:
-                print(f"    Skip: SHORT-Cap erreicht (max {risk_manager.MAX_SHORT_POSITIONS} Shorts — Korrelations-Schutz)")
+                print(f"    Skip: SHORT cap reached (max {risk_manager.MAX_SHORT_POSITIONS} Shorts — correlation guard)")
             elif strategy == "dca":
-                print(f"    Skip: DCA-Cap erreicht (max {risk_manager.MAX_DCA_POSITIONS} DCA-Positionen)")
+                print(f"    Skip: DCA cap reached (max {risk_manager.MAX_DCA_POSITIONS} DCA positions)")
             elif strategy == "gainer":
-                print(f"    Skip: Gainer-Slot belegt")
+                print(f"    Skip: Gainer slot occupied")
             else:
-                print(f"    Skip: Position nicht möglich ({symbol})")
+                print(f"    Skip: Position not possible ({symbol})")
             return False
 
         dca_mult = analysis.get("dca_multiplier", 1.0)
@@ -139,7 +139,8 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
     return False
 
 
-def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analysis, portfolio_val=None, drawdown_pct=0.0):
+def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analysis,
+                         portfolio_val=None, drawdown_pct=0.0, daily_pnl_pct=0.0):
     """Execute a gainer trade on Binance (paper mode). Fixed EUR position size."""
     price = analysis.get("price", 0)
     if price <= 0:
@@ -150,7 +151,7 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
         print(f"    [Gainer] Slot already occupied")
         return False
 
-    # Anti-Martingale: auch Gainer-Slot schrumpft in Drawdown
+    # Anti-Martingale: Gainer slot also shrinks in drawdown
     if drawdown_pct >= 3.0:
         dd_scale = 0.4
     elif drawdown_pct >= 2.0:
@@ -160,11 +161,19 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
     else:
         dd_scale = 1.0
 
+    # Tages-Verlust-Schutz (Lehre Log 22.04): SPK wurde bei Tages-P&L -0.30% eröffnet
+    # und verlor -9EUR. Bei jedem Tages-Minus halbe Größe — egal wie klein. Risiko
+    # darf im Minus NICHT aufgestockt werden.
+    if daily_pnl_pct < 0:
+        dd_scale = min(dd_scale, 0.5)
+
     # Dynamic: always 10% of current portfolio value (* dd_scale bei Drawdown)
     port = portfolio_val if portfolio_val else risk_manager.get_portfolio_value(exchange)
     amount_eur = port * Config.GAINER_SLOT_PCT * dd_scale
     volume = round(amount_eur / price, 8)
-    dd_note = f" [DD-Scale {dd_scale:.1f}x, drawdown {drawdown_pct:.1f}%]" if dd_scale < 1.0 else ""
+    dd_note = ""
+    if dd_scale < 1.0:
+        dd_note = f" [DD-Scale {dd_scale:.1f}x, drawdown {drawdown_pct:.1f}%, day P&L {daily_pnl_pct:+.2f}%]"
     print(f"    [Gainer] Size: {amount_eur:.2f}EUR ({Config.GAINER_SLOT_PCT*100:.0f}% of {port:.2f}EUR portfolio){dd_note}")
     result = exchange.place_order(symbol, "buy", volume)
 
@@ -619,6 +628,21 @@ def run_bot():
             allow_short_entries = market_bearish
             regime_state = "BULLISH" if market_bullish else "BEARISH" if market_bearish else "NEUTRAL"
 
+            # Log 22.04 Lehre: 35 valide SHORT-Breakdowns (AVAX, APE, CRV, ...) wurden
+            # in NEUTRAL geblockt während Longs ausgebluted sind. Erweiterung: in NEUTRAL
+            # zusätzlich Shorts erlauben wenn BTC 15m-Trend negativ ist (= Markt rutscht
+            # intraday, selbst wenn 3h-Filter noch NEUTRAL zeigt). Longs bleiben strikt
+            # BULLISH-only, da Log 17.04 zeigte: Longs in Micro-Downtrend = Gift.
+            neutral_short_ok = False
+            if not market_bullish and not market_bearish:  # NEUTRAL
+                btc_15m = exchange.get_ohlcv("BTC/EUR", "15m", limit=4)
+                if not btc_15m.empty and len(btc_15m) >= 2:
+                    btc_15m_change = (btc_15m["close"].iloc[-1] - btc_15m["close"].iloc[0]) / btc_15m["close"].iloc[0]
+                    if btc_15m_change < 0:
+                        allow_short_entries = True
+                        neutral_short_ok = True
+                        print(f"  [Regime-Ext] NEUTRAL + BTC 15m {btc_15m_change*100:+.2f}% → Shorts erlaubt")
+
             # Marktkontext-Exit: Shorts schließen wenn BTC dreht bullisch
             # - Verlierer mit >0.5% Minus → cut (Verlust abfedern)
             # - Gewinner ab +1.5% (nach Fees ~+1%) → lock gain (Profit sichern bevor Trend dreht)
@@ -974,7 +998,8 @@ def run_bot():
                     if best["strategy"] == "gainer":
                         traded = execute_gainer_trade(exchange, risk_mgr, logger, notifier,
                                                       symbol, best, portfolio_val,
-                                                      drawdown_pct=drawdown_from_peak)
+                                                      drawdown_pct=drawdown_from_peak,
+                                                      daily_pnl_pct=daily_pnl)
                     else:
                         traded = execute_trade(exchange, risk_mgr, logger, notifier,
                                                symbol, side, best, balance, portfolio_val,
