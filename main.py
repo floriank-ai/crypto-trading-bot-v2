@@ -1045,7 +1045,14 @@ def run_bot():
                 # negative Scores ≤ -5 werden als SHORT gehandelt, Regime-Gate
                 # erlaubt SHORTs nur in BEARISH/NEUTRAL (nicht BULLISH).
                 if "sentiment" in active and symbol in sentiment.signals:
-                    sig = sentiment.signals[symbol]
+                    sig = dict(sentiment.signals[symbol])  # copy — don't mutate cache
+                    # Sentiment-Signal hat keinen Preis (kommt nur aus Headline-Score).
+                    # Ohne Preis berechnet calculate_position_size() volume=0 → Skip.
+                    # Deshalb aktuellen Close aus dem OHLCV-Frame injecten.
+                    try:
+                        sig["price"] = float(df["close"].iloc[-1])
+                    except Exception:
+                        sig["price"] = 0
                     if sig["signal"] == Signal.BUY:
                         if loss_brake:
                             pass  # Verlustbremse: keine Longs
@@ -1054,9 +1061,8 @@ def run_bot():
                             print(f"    [sentiment] BUY: {sig['reason']}")
                     elif sig["signal"] == Signal.SELL:
                         if not market_bullish:
-                            sig_short = dict(sig)
-                            sig_short["direction"] = "short"
-                            signals.append(sig_short)
+                            sig["direction"] = "short"
+                            signals.append(sig)
                             print(f"    [sentiment] SHORT: {sig['reason']}")
 
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
