@@ -369,6 +369,7 @@ def run_bot():
     recently_traded = {}          # symbol -> ts, 30min Cooldown nach Trade
     last_sl_time = {}             # symbol -> ts, 6h Cooldown nach Stop-Loss
     trades_today_by_symbol = {}   # symbol -> count, Churn-Cap (3/Tag)
+    ghost_symbols_logged = set()  # Sentiment-Ghost-Symbole die wir schon geloggt haben
 
     # /reset confirm Telegram-Command: Paper-Balance auf INITIAL_CAPITAL zuruecksetzen.
     # Einmaliger Reset — bei naechstem Deploy laeuft es mit dem neuen Stand weiter
@@ -950,9 +951,20 @@ def run_bot():
                     print(f"  [Gainer] Kein Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% gefunden")
 
             # 3. Check news sentiment
+            # Ghost-Symbol-Filter: Gemini erfindet manchmal Ticker aus News-Headlines
+            # die es auf Kraken nicht gibt (DAT, THOR, POLYM, RUSSIA_CRYPTO,
+            # SPACEX_TOKEN, BINANCE_AI_WALLET, OKX, PUSD, etc.). Ohne Filter →
+            # 30+ OHLCV-Errors pro Coin und crasht den Bulk-Ticker-Call mit
+            # "Unknown asset pair". has_eur_pair() prueft Kraken-Markets direkt.
             if "sentiment" in active:
                 news_signals = sentiment.check_news()
                 for sym, sig in news_signals.items():
+                    base = sym.split("/")[0]
+                    if not exchange.has_eur_pair(base):
+                        if sym not in ghost_symbols_logged:
+                            print(f"  [Sentiment] Ghost-Symbol ignoriert: {sym} (nicht auf Kraken)")
+                            ghost_symbols_logged.add(sym)
+                        continue
                     if sym not in target_symbols:
                         target_symbols.append(sym)
 
@@ -1027,12 +1039,25 @@ def run_bot():
                             signals.append(sig)
                             print(f"    [dca] BUY: {sig['reason']}")
 
-                # Sentiment
+                # Sentiment — BUY UND SHORT (Regime-gated wie momentum)
+                # Vorher: nur BUY wurde gehandelt → in BEARISH-Markt war Sentiment
+                # effektiv tot (XRP SELL-Score -7 wurde ignoriert). Jetzt:
+                # negative Scores ≤ -5 werden als SHORT gehandelt, Regime-Gate
+                # erlaubt SHORTs nur in BEARISH/NEUTRAL (nicht BULLISH).
                 if "sentiment" in active and symbol in sentiment.signals:
                     sig = sentiment.signals[symbol]
                     if sig["signal"] == Signal.BUY:
-                        signals.append(sig)
-                        print(f"    [sentiment] BUY: {sig['reason']}")
+                        if loss_brake:
+                            pass  # Verlustbremse: keine Longs
+                        elif not market_bearish:
+                            signals.append(sig)
+                            print(f"    [sentiment] BUY: {sig['reason']}")
+                    elif sig["signal"] == Signal.SELL:
+                        if not market_bullish:
+                            sig_short = dict(sig)
+                            sig_short["direction"] = "short"
+                            signals.append(sig_short)
+                            print(f"    [sentiment] SHORT: {sig['reason']}")
 
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
                 # Kein Zeit-Filter mehr — Liquidity-Gate in execute_gainer_trade schuetzt stattdessen.
