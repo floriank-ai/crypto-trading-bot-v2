@@ -21,6 +21,7 @@ from sentiment import NewsSentimentAnalyzer
 from risk_manager import RiskManager
 from trade_logger import TradeLogger
 from notifier import Notifier
+from daily_summary import DailySummary
 
 
 
@@ -336,6 +337,7 @@ def run_bot():
     risk_mgr = RiskManager()
     logger = TradeLogger()
     notifier = Notifier()
+    daily_summary = DailySummary()  # CSV-Tagesreport (logs/daily_summary.csv) — kein Telegram
 
     # Restore open positions from trade log (survives Railway restarts)
     _restore_positions(risk_mgr, exchange)
@@ -512,6 +514,10 @@ def run_bot():
 
             balance = exchange.get_balance()
             portfolio_val = risk_mgr.get_portfolio_value(exchange)
+
+            # Tagesreport-CSV: prueft UTC-Tag-Wechsel, schreibt Zeile fuer Vortag.
+            # Erster Aufruf nach Restart legt nur den Tagesanker an.
+            daily_summary.tick(portfolio_val, len(risk_mgr.open_positions))
 
             # 4h-Bericht via Telegram
             current_hour = datetime.now().hour
