@@ -503,6 +503,11 @@ def run_bot():
     cycle = 0
     peak_portfolio = actual_portfolio
     hwm_pause_until = 0
+    # Sauber-Start-Stempel: zeigt explizit, dass alle In-Memory-State-Variablen
+    # auf den aktuellen Portfoliowert resettet wurden. Hilft bei Manual-Reset
+    # via Portfolio-Edit ohne Restart (peak/HWM bleiben sonst aus altem Lauf).
+    print(f"  [CleanStart] peak_portfolio={peak_portfolio:.2f}EUR | "
+          f"daily_start={risk_mgr.daily_start_value:.2f}EUR | hwm_pause=off")
     tageslimit_alerted_today = False  # verhindert Telegram-Spam bei dauerhaftem -5%
     # Kill-Switch: {strategy_name: unix_ts_until} — blutende Strategien pausieren
     paused_strategies = {}
