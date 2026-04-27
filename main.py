@@ -1131,6 +1131,27 @@ def run_bot():
                         else:
                             print(f"    [gainer] SKIP {symbol} +{gain_24h:.0f}%: {sig['reason']}")
 
+                # Sentiment-Confirm-Gate: Sentiment darf NICHT mehr allein triggern.
+                # Es muss von einer TA-Strategie (momentum/grid) in DERSELBEN Richtung
+                # bestaetigt werden. News-Score allein hat in 76k Logzeilen 0 profitable
+                # Trades erzeugt — TA-Confirmation ist der Filter gegen Hype-Echo.
+                # Momentum confirmt LONG+SHORT, Grid confirmt nur LONG (Range-Buy).
+                sent_in_signals = [s for s in signals if s.get("strategy") == "sentiment"]
+                if sent_in_signals:
+                    confirming = ("momentum", "grid")
+                    for ss in list(sent_in_signals):
+                        sent_dir = ss.get("direction", "long")
+                        confirmed = any(
+                            s.get("strategy") in confirming
+                            and s.get("direction", "long") == sent_dir
+                            for s in signals
+                            if s is not ss
+                        )
+                        if not confirmed:
+                            print(f"    [sentiment] {symbol} {sent_dir.upper()}: "
+                                  f"keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen")
+                            signals.remove(ss)
+
                 # Execute best signal (highest priority: gainer > sentiment > momentum > grid > dca)
                 if signals:
                     priority = {"gainer": 5, "sentiment": 4, "momentum": 3, "grid": 2, "dca": 1}
