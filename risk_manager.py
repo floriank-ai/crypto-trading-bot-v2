@@ -203,10 +203,13 @@ class RiskManager:
     MAX_DCA_POSITIONS = 3
     MAX_GAINER_POSITIONS = 2  # 2 parallele gainer-slots (Log 17.04: Gainer war einzige
                               # profitable Strategie — skalieren statt limitieren)
-    # Korrelations-Cap: max 3 Positionen pro Richtung, sonst ist das Portfolio nur
-    # gehebeltes BTC-Beta. Bei Peak gestern waren 11 gleiche Richtung = 1,67% in 10 min weg.
+    # Korrelations-Cap: Positionen pro Richtung. Bei Peak gestern waren 11 gleiche
+    # Richtung = 1,67% in 10 min weg. SHORT-Cap auf 4 erhoeht (27.04.2026): Bot-Edge
+    # liegt aktuell ueberwiegend auf SHORTs, 3 war zu eng (54x Skip in 7,5h am 25.04.).
+    # 4 SHORTs * 20% = 80% Exposure → bei 2% Markt-Pump max -16 EUR. Bei 5 waeren
+    # es 100% Exposure (-20 EUR pro 2% Pump) — zu viel Klumpenrisiko.
     MAX_LONG_POSITIONS = 3
-    MAX_SHORT_POSITIONS = 3
+    MAX_SHORT_POSITIONS = 4
 
     def get_weakest_position(self, exchange) -> str | None:
         """Return the symbol of the worst-performing open position (for rotation)."""

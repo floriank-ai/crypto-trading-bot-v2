@@ -33,6 +33,19 @@ def fmt_price(p: float) -> str:
     return f"{p:.6f}"
 
 
+def _is_blacklisted(symbol: str) -> bool:
+    """True wenn Symbol oder Base in Config.SYMBOL_BLACKLIST steht.
+    Stablecoins (USDT/EUR, USDC/EUR, ...) liefern strukturell ~0% PnL und blockieren
+    nur Slots. Match auf vollen Symbol-String UND Base-String, case-insensitive.
+    """
+    if not symbol:
+        return False
+    s = symbol.upper()
+    base = s.split("/")[0]
+    bl = [b.strip() for b in Config.SYMBOL_BLACKLIST if b and b.strip()]
+    return s in bl or base in bl
+
+
 def _restore_positions(risk_mgr, exchange):
     """Restore open positions from positions.json (written after every trade)."""
     import json, os
@@ -863,6 +876,13 @@ def run_bot():
             scan_results = scanner.scan()
             scanner.print_results(scan_results[:Config.AUTO_PICK_COUNT])
             target_symbols = [r["symbol"] for r in scan_results[:Config.AUTO_PICK_COUNT]]
+            # Stablecoin-Blacklist (USDT/USDC/DAI/...): nie handeln. Strukturell ~0% PnL,
+            # blockieren nur Slots. Vor allem USDT/EUR-SHORT lag 3 Tage bei -0,09 EUR
+            # und hielt einen SHORT-Cap-Slot fest (24./25.04.2026).
+            blacklisted_in_target = [s for s in target_symbols if _is_blacklisted(s)]
+            if blacklisted_in_target:
+                print(f"  [Blacklist] Stablecoins gefiltert: {', '.join(blacklisted_in_target)}")
+                target_symbols = [s for s in target_symbols if not _is_blacklisted(s)]
 
             # Gainer Discovery + Alarm: IMMER scannen (auch bei vollen Slots),
             # damit der Alarm bei besonders starken Gainern feuern kann — du
@@ -970,6 +990,9 @@ def run_bot():
                         if sym not in ghost_symbols_logged:
                             print(f"  [Sentiment] Ghost-Symbol ignoriert: {sym} (nicht auf Kraken)")
                             ghost_symbols_logged.add(sym)
+                        continue
+                    if _is_blacklisted(sym):
+                        # Stablecoins (USDT/USDC/...) gar nicht erst durch Sentiment einschleusen.
                         continue
                     if sym not in target_symbols:
                         target_symbols.append(sym)
@@ -1115,12 +1138,37 @@ def run_bot():
 
                     regime_exempt = strat in ("gainer", "dca", "grid")
                     if not regime_exempt:
+                        # High-Conviction-Bypass: in NEUTRAL werden normalerweise alle
+                        # Entries geblockt (Whipsaw-Schutz). Wenn Sentiment-Score absolut
+                        # >= HIGH_CONVICTION_SENTIMENT_SCORE (default 7) ODER Momentum
+                        # mit leverage >= HIGH_CONVICTION_MOMENTUM_LEVERAGE (default 2)
+                        # → Signal ist stark genug, durchlassen. Nur in NEUTRAL — gegen
+                        # die echte Trend-Richtung (BULLISH/BEARISH) niemals bypassen.
+                        # Lehre 17.04: strong-Bypass GEGEN Trend = 4x SHORT in BULLISH = -X EUR.
+                        score_abs = abs(best.get("score", 0) or 0)
+                        leverage = best.get("leverage", 1) or 1
+                        high_conv = (
+                            (strat == "sentiment" and score_abs >= Config.HIGH_CONVICTION_SENTIMENT_SCORE)
+                            or (strat == "momentum" and leverage >= Config.HIGH_CONVICTION_MOMENTUM_LEVERAGE)
+                        )
+                        only_neutral = (regime_state == "NEUTRAL")
+
                         if direction == "long" and not allow_long_entries:
-                            print(f"    Skip {symbol}: LONG blockiert (Regime {regime_state})")
-                            continue
+                            if high_conv and only_neutral:
+                                print(f"    [HighConviction-Bypass] {symbol} LONG: "
+                                      f"{strat} score={score_abs} lev={leverage} "
+                                      f"durchgelassen trotz Regime {regime_state}")
+                            else:
+                                print(f"    Skip {symbol}: LONG blockiert (Regime {regime_state})")
+                                continue
                         if direction == "short" and not allow_short_entries:
-                            print(f"    Skip {symbol}: SHORT blockiert (Regime {regime_state})")
-                            continue
+                            if high_conv and only_neutral:
+                                print(f"    [HighConviction-Bypass] {symbol} SHORT: "
+                                      f"{strat} score={score_abs} lev={leverage} "
+                                      f"durchgelassen trotz Regime {regime_state}")
+                            else:
+                                print(f"    Skip {symbol}: SHORT blockiert (Regime {regime_state})")
+                                continue
 
                     # Rotation: if strong signal (leverage>=2 OR scanner score>=10) but slots full or barely any cash
                     weakest = None

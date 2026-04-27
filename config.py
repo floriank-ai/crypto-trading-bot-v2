@@ -36,6 +36,22 @@ class Config:
     # Strategies
     ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment").split(",")
 
+    # High-Conviction-Bypass: in NEUTRAL-Regime werden normalerweise alle Entries
+    # geblockt (Whipsaw-Schutz). Wenn ein Signal ABER stark genug ist, darf es trotzdem
+    # durch. Schwellen kalibriert auf Log-Daten 25.04.: typische Sentiment-Scores 5-8,
+    # XRP-/SCAM-Crashes oft -6 bis -8.
+    HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 7))
+    HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 2))
+
+    # Symbol-Blacklist: nie handeln. Stablecoins liefern strukturell ~0% PnL und
+    # blockieren nur Slots (USDT/EUR-SHORT lag 3 Tage bei -0,09 EUR und hielt einen
+    # SHORT-Cap-Slot fest, der fuer profitable Setups gefehlt hat). Match auf
+    # vollen Symbol- oder Base-Strings (case-insensitive).
+    SYMBOL_BLACKLIST = os.getenv(
+        "SYMBOL_BLACKLIST",
+        "USDT,USDC,DAI,EURT,EURC,PYUSD,TUSD,FDUSD,USDE,RLUSD"
+    ).upper().split(",")
+
     # Momentum-Prioritätsliste: Coins die historisch gut mit Momentum funktionieren
     # Wird wöchentlich vom Auto-Optimizer befüllt — kein hardcoded Ban mehr
     # Alle anderen Coins sind weiterhin handelbar, kommen nur weiter hinten im Scan
