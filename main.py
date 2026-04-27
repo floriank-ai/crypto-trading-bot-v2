@@ -984,6 +984,7 @@ def run_bot():
             # "Unknown asset pair". has_eur_pair() prueft Kraken-Markets direkt.
             if "sentiment" in active:
                 news_signals = sentiment.check_news()
+                sentiment_wl = [s.strip() for s in Config.SENTIMENT_WHITELIST if s and s.strip()]
                 for sym, sig in news_signals.items():
                     base = sym.split("/")[0]
                     if not exchange.has_eur_pair(base):
@@ -993,6 +994,15 @@ def run_bot():
                         continue
                     if _is_blacklisted(sym):
                         # Stablecoins (USDT/USDC/...) gar nicht erst durch Sentiment einschleusen.
+                        continue
+                    # Whitelist: nur BTC/EUR (default). Alts reagieren nicht auf News.
+                    if sym.upper() not in sentiment_wl:
+                        continue
+                    # Min-Score: BTC ist taeglich News, nur sehr starkes Sentiment zaehlt.
+                    score_abs = abs(sig.get("score", 0) or 0)
+                    if score_abs < Config.SENTIMENT_MIN_SCORE:
+                        print(f"  [Sentiment] {sym} score={sig.get('score')} unter Schwelle "
+                              f"{Config.SENTIMENT_MIN_SCORE} — ignoriert (BTC-News-Noise)")
                         continue
                     if sym not in target_symbols:
                         target_symbols.append(sym)
@@ -1068,31 +1078,41 @@ def run_bot():
                             signals.append(sig)
                             print(f"    [dca] BUY: {sig['reason']}")
 
-                # Sentiment — BUY UND SHORT (Regime-gated wie momentum)
-                # Vorher: nur BUY wurde gehandelt → in BEARISH-Markt war Sentiment
-                # effektiv tot (XRP SELL-Score -7 wurde ignoriert). Jetzt:
-                # negative Scores ≤ -5 werden als SHORT gehandelt, Regime-Gate
-                # erlaubt SHORTs nur in BEARISH/NEUTRAL (nicht BULLISH).
-                if "sentiment" in active and symbol in sentiment.signals:
+                # Sentiment — nur BTC/EUR (Whitelist) + Min-Score (default 8).
+                # Lehre 25.-27.04.2026: Sentiment hat 0 profitable Trades erzeugt,
+                # XRP/Alts reagieren kaum auf News. BTC-only + hoher Score-Cut
+                # filtert das tägliche BTC-News-Rauschen raus.
+                _sent_wl = [s.strip() for s in Config.SENTIMENT_WHITELIST if s and s.strip()]
+                if (
+                    "sentiment" in active
+                    and symbol in sentiment.signals
+                    and symbol.upper() in _sent_wl
+                ):
                     sig = dict(sentiment.signals[symbol])  # copy — don't mutate cache
-                    # Sentiment-Signal hat keinen Preis (kommt nur aus Headline-Score).
-                    # Ohne Preis berechnet calculate_position_size() volume=0 → Skip.
-                    # Deshalb aktuellen Close aus dem OHLCV-Frame injecten.
-                    try:
-                        sig["price"] = float(df["close"].iloc[-1])
-                    except Exception:
-                        sig["price"] = 0
-                    if sig["signal"] == Signal.BUY:
-                        if loss_brake:
-                            pass  # Verlustbremse: keine Longs
-                        elif not market_bearish:
-                            signals.append(sig)
-                            print(f"    [sentiment] BUY: {sig['reason']}")
-                    elif sig["signal"] == Signal.SELL:
-                        if not market_bullish:
-                            sig["direction"] = "short"
-                            signals.append(sig)
-                            print(f"    [sentiment] SHORT: {sig['reason']}")
+                    # Min-Score-Gate (zweite Verteidigungslinie, auch wenn das Symbol
+                    # schon ueber den ghost-block-Filter durchgekommen ist)
+                    _score_abs = abs(sig.get("score", 0) or 0)
+                    if _score_abs < Config.SENTIMENT_MIN_SCORE:
+                        pass  # zu schwach, Sentiment-Signal verwerfen
+                    else:
+                        # Sentiment-Signal hat keinen Preis (kommt nur aus Headline-Score).
+                        # Ohne Preis berechnet calculate_position_size() volume=0 → Skip.
+                        # Deshalb aktuellen Close aus dem OHLCV-Frame injecten.
+                        try:
+                            sig["price"] = float(df["close"].iloc[-1])
+                        except Exception:
+                            sig["price"] = 0
+                        if sig["signal"] == Signal.BUY:
+                            if loss_brake:
+                                pass  # Verlustbremse: keine Longs
+                            elif not market_bearish:
+                                signals.append(sig)
+                                print(f"    [sentiment] BUY: {sig['reason']}")
+                        elif sig["signal"] == Signal.SELL:
+                            if not market_bullish:
+                                sig["direction"] = "short"
+                                signals.append(sig)
+                                print(f"    [sentiment] SHORT: {sig['reason']}")
 
                 # Gainer: Kraken-Coin mit extremem 24h-Gewinn — höchste Priorität, 1 fixer Slot
                 # Kein Zeit-Filter mehr — Liquidity-Gate in execute_gainer_trade schuetzt stattdessen.

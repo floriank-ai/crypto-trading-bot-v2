@@ -43,6 +43,15 @@ class Config:
     HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 7))
     HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 2))
 
+    # Sentiment-Whitelist: nur diese Symbole duerfen ueber Sentiment getradet werden.
+    # Lehre 25.-27.04.2026: Sentiment hat in 76k Logzeilen NULL profitable Trades
+    # erzeugt — Alts (XRP, etc.) reagieren kaum auf News, nur BTC reagiert konsistent.
+    # Default BTC-only. ETH bewusst raus (zu viel L2/Narrative-Rauschen).
+    SENTIMENT_WHITELIST = os.getenv("SENTIMENT_WHITELIST", "BTC/EUR").upper().split(",")
+    # Mindest-|score|: BTC ist taeglich in den News, Standard-Score 5-6 ist Noise.
+    # Erst ab 8 ist es ein echt starkes Signal (ETF-Approval, Halving, China-Ban-Level).
+    SENTIMENT_MIN_SCORE = int(os.getenv("SENTIMENT_MIN_SCORE", 8))
+
     # Symbol-Blacklist: nie handeln. Stablecoins liefern strukturell ~0% PnL und
     # blockieren nur Slots (USDT/EUR-SHORT lag 3 Tage bei -0,09 EUR und hielt einen
     # SHORT-Cap-Slot fest, der fuer profitable Setups gefehlt hat). Match auf
