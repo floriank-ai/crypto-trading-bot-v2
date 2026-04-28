@@ -24,16 +24,29 @@ class Exchange:
             self._restore_paper_balance()
 
     def _reset_paper_state(self):
-        """Hard reset: wipe logs and start fresh with INITIAL_CAPITAL."""
-        for path in [os.path.join("logs", "trades.json"), os.path.join("logs", "positions.json")]:
+        """Hard reset: wipe logs and start fresh with INITIAL_CAPITAL.
+
+        28.04.2026: Erweitert um daily_summary_state.json (sonst hängt Tagesanker
+        von gestern fest → falscher Tages-P&L) und paper_short_positions.
+        """
+        wipe_files = [
+            (os.path.join("logs", "trades.json"), "[]"),
+            (os.path.join("logs", "positions.json"), "{}"),
+            (os.path.join("logs", "daily_summary_state.json"), "{}"),
+        ]
+        for path, content in wipe_files:
             try:
                 os.makedirs("logs", exist_ok=True)
                 with open(path, "w") as f:
-                    f.write("[]" if path.endswith("trades.json") else "{}")
+                    f.write(content)
             except Exception:
                 pass
         self.paper_balance = Config.INITIAL_CAPITAL
+        self.paper_positions = {}
+        if hasattr(self, "paper_short_positions"):
+            self.paper_short_positions = {}
         print(f"  [Reset] Paper Trading zurückgesetzt auf {Config.INITIAL_CAPITAL:.2f} EUR")
+        print(f"  [Reset] Wiped: trades.json, positions.json, daily_summary_state.json")
 
     def _restore_paper_balance(self):
         """Restore paper balance from trades.json on restart (for persistent deployments)."""
