@@ -34,7 +34,9 @@ class Config:
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
     # Strategies
-    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment").split(",")
+    # 28.04.2026: grid dazu — Audit zeigte 75% NEUTRAL-Cycles, Grid ist regime-exempt
+    # und confirmt zusätzlich Sentiment-LONG. Mehr Signal-Quellen = mehr 2-3%/Tag-Chancen.
+    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment,grid").split(",")
 
     # High-Conviction-Bypass: in NEUTRAL-Regime werden normalerweise alle Entries
     # geblockt (Whipsaw-Schutz). Wenn ein Signal ABER stark genug ist, darf es trotzdem
