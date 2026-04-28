@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from config import Config
 
 POSITIONS_PATH = os.path.join("logs", "positions.json")
@@ -159,11 +160,19 @@ class RiskManager:
 
     def calculate_position_size(self, balance: float, price: float, strategy: str = "momentum",
                                  dca_multiplier: float = 1.0, leverage: int = 1,
-                                 drawdown_pct: float = 0.0) -> float:
-        """Calculate position size. DCA uses fixed EUR amount, others use risk %.
+                                 drawdown_pct: float = 0.0,
+                                 signal_strength: str = "normal") -> float:
+        """Calculate position size. DCA uses fixed EUR amount, others use Tier-EUR.
+
+        Sizing-Tiers (momentum/sentiment) ab 28.04.2026:
+          - "strong" → 200 EUR (max MAX_STRONG_POSITIONS gleichzeitig)
+          - "normal" → 100 EUR
+          - Cash-Reserve-Modus (balance < MIN_CASH_RESERVE_EUR) → 50 EUR
+
+        Vorher: balance * 0.20 schrumpfte mit sinkendem Cash → 25 EUR Trades.
+        Folge: 54% Fee-Drag, kein 2-3%/Tag-Ziel erreichbar.
 
         Anti-Martingale: in drawdown wird die Position KLEINER, nicht groesser.
-        Gegenteil von Martingale — bei Verluststrecke deckeln statt doppeln.
         """
         # Anti-Martingale-Scale: drawdown_pct ist der aktuelle Drawdown vom Peak in %
         if drawdown_pct >= 3.0:
@@ -190,14 +199,32 @@ class RiskManager:
             position_value = balance * 0.15 * dd_scale  # 15% per grid level
             return round(position_value / price, 8) if price > 0 else 0
 
-        # Momentum / sentiment: aggressive sizing + leverage + anti-martingale
-        risk_amount = balance * self.max_risk
-        position_value = risk_amount / self.stop_loss_pct
-        max_position = balance * 0.20  # max 20% pro Position
-        position_value = min(position_value, max_position)
-        position_value *= leverage
-        position_value = min(position_value, balance * 0.20)  # auch mit Hebel max 20%
+        # Momentum / sentiment: Fixed-EUR Tier-Sizing
+        # Cash-Reserve-Schutz: wenn unter MIN_CASH_RESERVE → nur Min-Sizing.
+        # So bleibt immer Reserve fuer Gainer + Margin.
+        if balance < Config.MIN_CASH_RESERVE_EUR:
+            position_value = Config.POSITION_SIZE_MIN_EUR
+        elif signal_strength == "strong":
+            # Strong-Cap: MAX_STRONG_POSITIONS gleichzeitig (Default 2)
+            strong_count = sum(
+                1 for p in self.open_positions.values()
+                if p.get("sizing_tier") == "strong"
+            )
+            if strong_count < Config.MAX_STRONG_POSITIONS:
+                position_value = Config.POSITION_SIZE_STRONG_EUR
+            else:
+                position_value = Config.POSITION_SIZE_NORMAL_EUR
+        else:
+            position_value = Config.POSITION_SIZE_NORMAL_EUR
+
+        # Anti-Martingale auf Fixed-EUR anwenden (in Drawdown kleiner traden)
         position_value *= dd_scale
+
+        # Sicherheits-Cap: nie mehr als (balance - 50 EUR Puffer) ausgeben
+        # — sonst koennte die letzte 200er-Position den Cash auf <50 driften.
+        max_safe = max(0.0, balance - 50.0)
+        position_value = min(position_value, max_safe)
+
         return round(position_value / price, 8) if price > 0 else 0
 
     MAX_DCA_POSITIONS = 3
@@ -255,8 +282,13 @@ class RiskManager:
         return True
 
     def open_position(self, symbol: str, price: float, volume: float,
-                      strategy: str = "momentum", direction: str = "long"):
-        """Track a new position with strategy-aware SL/TP. direction: long or short."""
+                      strategy: str = "momentum", direction: str = "long",
+                      sizing_tier: str = "normal"):
+        """Track a new position with strategy-aware SL/TP. direction: long or short.
+
+        sizing_tier: "normal" (100 EUR) | "strong" (200 EUR). Wird auf der Position
+        gespeichert, damit calculate_position_size den MAX_STRONG_POSITIONS-Cap zaehlen kann.
+        """
         sl_pct = self.stop_loss_pct * 1.5 if strategy == "sentiment" else self.stop_loss_pct
         tp_pct = self.take_profit_pct * 1.5 if strategy == "sentiment" else self.take_profit_pct
 
@@ -292,6 +324,8 @@ class RiskManager:
             "direction": direction,
             "margin": margin,
             "partial_tps_taken": [],
+            "sizing_tier": sizing_tier,
+            "opened_at": time.time(),  # fuer Time-Stop (28.04.2026)
         }
         self._save_positions()
 

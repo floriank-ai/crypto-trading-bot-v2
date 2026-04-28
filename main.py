@@ -122,7 +122,13 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
 
         dca_mult = analysis.get("dca_multiplier", 1.0)
         leverage = analysis.get("leverage", 1)
-        volume = risk_manager.calculate_position_size(balance, price, strategy, dca_mult, leverage, drawdown_pct)
+        # signal_strength wird vom Caller (cycle-loop) gesetzt: "strong" wenn
+        # lev>=3 oder Sentiment+Momentum confirm beide gleich-Richtung. Sonst "normal".
+        signal_strength = analysis.get("signal_strength", "normal")
+        volume = risk_manager.calculate_position_size(
+            balance, price, strategy, dca_mult, leverage, drawdown_pct,
+            signal_strength=signal_strength,
+        )
         min_order = exchange.get_min_order(symbol)
 
         if volume < min_order:
@@ -135,7 +141,12 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
             cost = result.get("cost", volume * exec_price)
             fee = result.get("fee", cost * 0.0026)
 
-            risk_manager.open_position(symbol, exec_price, volume, strategy, direction)
+            risk_manager.open_position(
+                symbol, exec_price, volume, strategy, direction,
+                sizing_tier=signal_strength,
+            )
+            print(f"    Sizing: {signal_strength.upper()} ~{volume * exec_price:.0f}EUR "
+                  f"(cash {balance:.0f}EUR)")
             log_side = "short" if direction == "short" else "buy"
             logger.log_trade(pair=symbol, side=log_side, volume=volume,
                              price=exec_price, cost=cost, fee=fee,
@@ -236,7 +247,7 @@ def execute_gainer_trade(exchange, risk_manager, logger, notifier, symbol, analy
         return False
 
 
-def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None):
+def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, last_win_time=None):
     """Check all open positions for partial-TP, stop-loss, take-profit.
 
     last_sl_time: dict symbol->timestamp; bei STOP_LOSS gesetzt. Main-Loop nutzt
@@ -322,6 +333,11 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None):
                 # Verhindert SPK-Szenario (4x gekauft, 3x stop-geloss't, -21EUR).
                 if exit_type == "stop_loss" and last_sl_time is not None:
                     last_sl_time[symbol] = time.time()
+                # Win-Cooldown: nach profitablem Exit WIN_COOLDOWN_HOURS Pause.
+                # ORCA 27.04.: Win +7.02 → 2.5h spaeter Re-Entry → SL -4.98.
+                # Setup ist durch, nicht direkt wieder rein.
+                if pnl > 0 and last_win_time is not None:
+                    last_win_time[symbol] = time.time()
 
     return exits
 
@@ -383,6 +399,7 @@ def run_bot():
     # Cooldown/Churn-State fruh initialisieren (damit do_reset() sie clearen kann)
     recently_traded = {}          # symbol -> ts, 30min Cooldown nach Trade
     last_sl_time = {}             # symbol -> ts, 6h Cooldown nach Stop-Loss
+    last_win_time = {}            # symbol -> ts, WIN_COOLDOWN_HOURS Pause nach profit-exit
     trades_today_by_symbol = {}   # symbol -> count, Churn-Cap (3/Tag)
     ghost_symbols_logged = set()  # Sentiment-Ghost-Symbole die wir schon geloggt haben
 
@@ -853,9 +870,59 @@ def run_bot():
                 print(f"  ⚠️  VERLUSTBREMSE aktiv ({daily_pnl:.2f}%) — nur Shorts erlaubt")
 
             # 1. Check exits first
-            exits = check_exits(exchange, risk_mgr, logger, notifier, last_sl_time=last_sl_time)
+            exits = check_exits(exchange, risk_mgr, logger, notifier,
+                                last_sl_time=last_sl_time, last_win_time=last_win_time)
             for sym, etype, pnl in exits:
                 print(f"    Exited {sym}: {etype} P&L {pnl:+.2f}EUR")
+
+            # Time-Stop: Positionen die >X Stunden offen sind UND P&L flatlined
+            # (zwischen ±Y%) → Soft-Close. Verhindert Slot-Belegung durch hängende
+            # Trades. Lehre 27.04.2026: 4 SHORTs hingen 8h+ flatlined und blockierten
+            # 37 weitere Setup-Versuche. Gainer/DCA/Grid sind ausgenommen — die haben
+            # eigene Akkumulationslogik.
+            ts_secs = Config.POSITION_TIME_STOP_HOURS * 3600
+            ts_max_pnl = Config.POSITION_TIME_STOP_MAX_PNL_PCT / 100.0
+            for sym in list(risk_mgr.open_positions.keys()):
+                pos = risk_mgr.open_positions[sym]
+                if pos.get("strategy") in ("gainer", "dca", "grid"):
+                    continue
+                opened_at = pos.get("opened_at", 0)
+                if not opened_at:
+                    continue  # Alt-Positionen ohne Zeitstempel ignorieren (Restart-safe)
+                age_h = (time.time() - opened_at) / 3600
+                if age_h < Config.POSITION_TIME_STOP_HOURS:
+                    continue
+                ticker = exchange.get_ticker(sym)
+                cur = (ticker or {}).get("last")
+                if not cur:
+                    continue
+                d = pos.get("direction", "long")
+                pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
+                if d == "short":
+                    pnl_pct = -pnl_pct
+                if abs(pnl_pct) > ts_max_pnl:
+                    continue  # Position lebt noch — TP/SL kann greifen
+                # Flatlined → close
+                print(f"  [TimeStop] {sym} {d.upper()} {age_h:.1f}h offen, "
+                      f"P&L {pnl_pct*100:+.2f}% (innerhalb ±{Config.POSITION_TIME_STOP_MAX_PNL_PCT}%) → Soft-Close")
+                res = exchange.place_order(sym, "sell", pos["volume"])
+                if res["status"] == "ok":
+                    cp = res.get("price", cur)
+                    cost = res.get("cost", pos["volume"] * cp)
+                    fee = res.get("fee", cost * 0.0026)
+                    if d == "long":
+                        pnl_eur = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
+                    else:
+                        pnl_eur = (pos["entry_price"] - cp) * pos["volume"] - 2 * fee
+                    log_side = "cover" if d == "short" else "sell"
+                    logger.log_trade(pair=sym, side=log_side, volume=pos["volume"],
+                                     price=cp, cost=cost, fee=fee,
+                                     mode=Config.TRADING_MODE, strategy=pos["strategy"],
+                                     signal_reason="time_stop_flatlined",
+                                     balance_after=exchange.get_balance(),
+                                     realized_pnl=pnl_eur)
+                    risk_mgr.close_position(sym)
+                    print(f"    Closed {sym}: P&L {pnl_eur:+.2f}EUR")
 
             # Gainer-Slot Status: max 2 parallel (MAX_GAINER_POSITIONS=2)
             gainer_count = sum(
@@ -1037,6 +1104,15 @@ def run_bot():
                     print(f"  {symbol} Post-SL-Cooldown noch {remaining_h:.1f}h (Stop-Loss vor {(time.time()-last_sl_time[symbol])/3600:.1f}h)")
                     continue
 
+                # Win-Cooldown: nach profitablem Exit WIN_COOLDOWN_HOURS Pause.
+                # Lehre 27.04. ORCA: Win +7.02EUR → 2.5h spaeter Re-Entry @ -4.98EUR.
+                # Setup ist durch, Re-Entry kommt zu spaet im Run.
+                win_cooldown_secs = Config.WIN_COOLDOWN_HOURS * 3600
+                if symbol in last_win_time and (time.time() - last_win_time[symbol]) < win_cooldown_secs:
+                    remaining_m = int((win_cooldown_secs - (time.time() - last_win_time[symbol])) / 60)
+                    print(f"  {symbol} Win-Cooldown noch {remaining_m}min (profit-exit vor {(time.time()-last_win_time[symbol])/60:.0f}min)")
+                    continue
+
                 print(f"\n  Analyzing {symbol}...")
                 df = exchange.get_ohlcv(symbol, "15m", limit=100)
                 if df.empty:
@@ -1163,6 +1239,31 @@ def run_bot():
                     best = max(signals, key=lambda s: priority.get(s.get("strategy", ""), 0))
                     direction = best.get("direction", "long")
                     side = "sell" if direction == "short" else "buy"
+
+                    # Signal-Strength: bestimmt Position-Sizing (200 vs 100 EUR).
+                    # "strong" wenn:
+                    #   - Momentum mit lev>=3 (selten, echtes Trend-Setup)
+                    #   - Sentiment+Momentum gleiche Richtung (TA-Confirm + News)
+                    # Sonst "normal" (100 EUR Default).
+                    _best_dir = best.get("direction", "long")
+                    _best_strat = best.get("strategy", "")
+                    _best_lev = best.get("leverage", 1) or 1
+                    _has_sentiment_confirm = any(
+                        s.get("strategy") == "sentiment"
+                        and s.get("direction", "long") == _best_dir
+                        for s in signals
+                    )
+                    _has_momentum_confirm = any(
+                        s.get("strategy") == "momentum"
+                        and s.get("direction", "long") == _best_dir
+                        for s in signals
+                    )
+                    if _best_strat == "momentum" and _best_lev >= 3:
+                        best["signal_strength"] = "strong"
+                    elif _has_sentiment_confirm and _has_momentum_confirm:
+                        best["signal_strength"] = "strong"
+                    else:
+                        best["signal_strength"] = "normal"
 
                     # Regime-Gate: LONGs nur in BULLISH, SHORTs nur in BEARISH.
                     # Gainer ist ausgenommen — hat eigenen 15%-24h-Filter, funktioniert

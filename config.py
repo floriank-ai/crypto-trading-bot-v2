@@ -41,16 +41,45 @@ class Config:
     # durch. Schwellen kalibriert auf Log-Daten 25.04.: typische Sentiment-Scores 5-8,
     # XRP-/SCAM-Crashes oft -6 bis -8.
     HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 7))
-    HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 2))
+    # 28.04.2026: 3 von 4 Long-Verlierern waren Bypass-Trades mit lev=2 (Min-Schwelle).
+    # Auf 3 angehoben — lev=3 ist seltener aber statistisch belastbar.
+    HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 3))
 
     # Sentiment-Whitelist: nur diese Symbole duerfen ueber Sentiment getradet werden.
     # Lehre 25.-27.04.2026: Sentiment hat in 76k Logzeilen NULL profitable Trades
     # erzeugt — Alts (XRP, etc.) reagieren kaum auf News, nur BTC reagiert konsistent.
     # Default BTC-only. ETH bewusst raus (zu viel L2/Narrative-Rauschen).
     SENTIMENT_WHITELIST = os.getenv("SENTIMENT_WHITELIST", "BTC/EUR").upper().split(",")
-    # Mindest-|score|: BTC ist taeglich in den News, Standard-Score 5-6 ist Noise.
-    # Erst ab 8 ist es ein echt starkes Signal (ETF-Approval, Halving, China-Ban-Level).
-    SENTIMENT_MIN_SCORE = int(os.getenv("SENTIMENT_MIN_SCORE", 8))
+    # Mindest-|score|: 27.04.2026 9h Logfenster zeigte: hoechster Score in 9h war 7
+    # → Schwelle 8 = Strategie tot. Auf 6 reduziert: in derselben Periode haetten
+    # ~192 Signale durchgekonnt, dann filtert TA-Confirm-Gate die unbestaetigten raus.
+    SENTIMENT_MIN_SCORE = int(os.getenv("SENTIMENT_MIN_SCORE", 6))
+
+    # Position-Sizing-Tiers: Fixed-EUR statt Risk-%-Logik (alte Logik schrumpfte mit
+    # sinkendem Cash → 25 EUR Trades bei 705 EUR Cash). 27.04.2026 Audit: Fees
+    # 6.39 EUR vs. Net 5.36 EUR = 54% Fee-Drag — viel zu viel. Bigger Trades = weniger
+    # relativer Fee-Drag.
+    POSITION_SIZE_MIN_EUR = float(os.getenv("POSITION_SIZE_MIN_EUR", 50))    # Cash-Reserve-Modus
+    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 100))  # Default
+    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 200))  # Sehr gutes Signal
+    # Hard-Reserve fuer Gainer-Strategie (2 Slots * 100 EUR = 200) + 50 EUR Puffer.
+    # Wenn Cash darunter → nur Min-Sizing (50 EUR), damit Gainer immer schlagen kann.
+    MIN_CASH_RESERVE_EUR = float(os.getenv("MIN_CASH_RESERVE_EUR", 250))
+    # Max parallele "strong"-Positions (200-EUR-Tier). Verhindert dass 7 Slots * 200
+    # = 1400 EUR Exposure das Kapital sprengen.
+    MAX_STRONG_POSITIONS = int(os.getenv("MAX_STRONG_POSITIONS", 2))
+
+    # Time-Stop: Position die >X Stunden offen ist UND P&L flatlined zwischen
+    # ±Y% → Soft-Close. 27.04.2026: 4 SHORTs hingen 8h+ ohne Bewegung, blockierten
+    # Slots fuer 37 weitere Setups.
+    POSITION_TIME_STOP_HOURS = float(os.getenv("POSITION_TIME_STOP_HOURS", 4.0))
+    POSITION_TIME_STOP_MAX_PNL_PCT = float(os.getenv("POSITION_TIME_STOP_MAX_PNL_PCT", 1.0))
+
+    # Win-Cooldown: nach profitablem Exit X Stunden Pause fuer dasselbe Symbol.
+    # ORCA 27.04.: Win +7.02, dann 2.5h spaeter Re-Entry → SL -4.98. Erstes Setup
+    # war durch, wir sollten nicht direkt wieder rein.
+    WIN_COOLDOWN_HOURS = float(os.getenv("WIN_COOLDOWN_HOURS", 2.0))
+
 
     # Symbol-Blacklist: nie handeln. Stablecoins liefern strukturell ~0% PnL und
     # blockieren nur Slots (USDT/EUR-SHORT lag 3 Tage bei -0,09 EUR und hielt einen
