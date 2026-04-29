@@ -782,10 +782,16 @@ def run_bot():
                 btc_15m = exchange.get_ohlcv("BTC/EUR", "15m", limit=4)
                 if not btc_15m.empty and len(btc_15m) >= 2:
                     btc_15m_change = (btc_15m["close"].iloc[-1] - btc_15m["close"].iloc[0]) / btc_15m["close"].iloc[0]
-                    if btc_15m_change < 0:
+                    # 29.04.2026: Schwelle von <0 auf <-0.5% verschaerft.
+                    # Audit zeigte 4/4 NEUTRAL-Shorts verloren weil 15m-Noise (-0.01%
+                    # bis -0.3%) als "Bear-Signal" gewertet wurde. Echtes
+                    # Intraday-Rutschen braucht mindestens -0.5%.
+                    if btc_15m_change < Config.NEUTRAL_SHORT_BTC_15M_THRESHOLD:
                         allow_short_entries = True
                         neutral_short_ok = True
-                        print(f"  [Regime-Ext] NEUTRAL + BTC 15m {btc_15m_change*100:+.2f}% → Shorts erlaubt")
+                        print(f"  [Regime-Ext] NEUTRAL + BTC 15m {btc_15m_change*100:+.2f}% (<{Config.NEUTRAL_SHORT_BTC_15M_THRESHOLD*100:.1f}%) → Shorts erlaubt")
+                    elif btc_15m_change < 0:
+                        print(f"  [Regime-Ext] NEUTRAL + BTC 15m {btc_15m_change*100:+.2f}% → unter Schwelle ({Config.NEUTRAL_SHORT_BTC_15M_THRESHOLD*100:.1f}%), Shorts geblockt")
 
             # Marktkontext-Exit: Shorts schließen wenn BTC dreht bullisch
             # - Verlierer mit >0.5% Minus → cut (Verlust abfedern)
@@ -1258,9 +1264,19 @@ def run_bot():
                         and s.get("direction", "long") == _best_dir
                         for s in signals
                     )
+                    _has_grid_confirm = any(
+                        s.get("strategy") == "grid"
+                        and s.get("direction", "long") == _best_dir
+                        for s in signals
+                    )
+                    # 29.04.2026: STRONG-Tier breiter. Bisher feuerte nie STRONG (11/11 NORMAL),
+                    # weil Sentiment-Confirm Voraussetzung war und Sentiment selbst nie firet.
+                    # Jetzt: jede 2-Strategien-Confluence (momentum+grid, sentiment+momentum,
+                    # sentiment+grid) zaehlt als STRONG. Plus weiterhin lev>=3 momentum.
+                    _confirms = sum([_has_sentiment_confirm, _has_momentum_confirm, _has_grid_confirm])
                     if _best_strat == "momentum" and _best_lev >= 3:
                         best["signal_strength"] = "strong"
-                    elif _has_sentiment_confirm and _has_momentum_confirm:
+                    elif _confirms >= 2:
                         best["signal_strength"] = "strong"
                     else:
                         best["signal_strength"] = "normal"

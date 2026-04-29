@@ -80,7 +80,16 @@ class Config:
     # Win-Cooldown: nach profitablem Exit X Stunden Pause fuer dasselbe Symbol.
     # ORCA 27.04.: Win +7.02, dann 2.5h spaeter Re-Entry → SL -4.98. Erstes Setup
     # war durch, wir sollten nicht direkt wieder rein.
-    WIN_COOLDOWN_HOURS = float(os.getenv("WIN_COOLDOWN_HOURS", 2.0))
+    # 29.04.2026: 2h hat 393 Re-Entries blockiert. Auf 0.5h (30min) reduziert —
+    # genug um Whipsaw zu verhindern, kurz genug um neue Setups nicht zu killen.
+    WIN_COOLDOWN_HOURS = float(os.getenv("WIN_COOLDOWN_HOURS", 0.5))
+
+    # NEUTRAL-Short-Gate: in NEUTRAL-Regime werden Shorts nur erlaubt, wenn BTC 15m
+    # mindestens X% nachgibt. 28.04.2026 Audit: btc_15m < 0 (alles unter 0%) hat 4
+    # Shorts ausgeloest die ALLE -3.94 EUR verloren haben — Markt war 95% NEUTRAL,
+    # 15m-Wackler waren keine Trends. Schwelle auf -0.5% angehoben (echtes
+    # Intraday-Rutschen, nicht Noise).
+    NEUTRAL_SHORT_BTC_15M_THRESHOLD = float(os.getenv("NEUTRAL_SHORT_BTC_15M_THRESHOLD", -0.005))
 
 
     # Symbol-Blacklist: nie handeln. Stablecoins liefern strukturell ~0% PnL und

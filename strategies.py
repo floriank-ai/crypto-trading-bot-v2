@@ -203,13 +203,16 @@ class GainerStrategy:
                     "reason": "EMA not bullish",
                     "strategy": "gainer"}
 
-        # Letzte 15m-Kerze muss grün sein — SPK war bereits im 15m-Rückfall als Bot kaufte.
-        # Grüne Kerze = Momentum aktuell positiv, nicht bereits am Umkehren.
+        # Letzte 15m-Kerze: bis 29.04.2026 hart "muss grün sein". Audit zeigte aber
+        # 0 Gainer-Trades über 22h weil JEDE Konsolidierungs-Candle (-0.1% rot) das
+        # Setup killte — APE +20% wurde stundenlang abgewiesen. Tolerieren jetzt bis
+        # -0.3% rot (= flache Konsolidierung). Tiefer rot bleibt Skip.
         last_close = close.iloc[-1]
         last_open = open_.iloc[-1]
-        if last_close <= last_open:
+        candle_pct = (last_close - last_open) / last_open if last_open > 0 else 0
+        if candle_pct < -0.003:  # mehr als -0.3% rot = echtes Drehen
             return {"signal": Signal.HOLD,
-                    "reason": "Letzte 15m rot — Momentum dreht bereits",
+                    "reason": f"Letzte 15m {candle_pct*100:.2f}% rot — Momentum dreht bereits",
                     "strategy": "gainer"}
 
         # Volume: must still have elevated volume (not fading)
@@ -219,9 +222,22 @@ class GainerStrategy:
                     "reason": "Volume fading — momentum dying",
                     "strategy": "gainer"}
 
+        # 29.04.2026 Peak-Schutz: nicht am absoluten 4h-Hoch einsteigen.
+        # Nachdem 15m-rot-Filter gelockert ist (Konsolidierung tolerant), brauchen wir
+        # einen Hard-Cap gegen FOMO-Peaks: Preis muss min 1.5% unter dem Hoch der
+        # letzten 16 15m-Candles (=4h) sein. Coins die exakt am 4h-High kleben sind
+        # statistisch im Top-Bereich des Pumps.
+        if len(df) >= 16:
+            high_4h = df["high"].iloc[-16:].max()
+            if high_4h > 0 and last_close >= high_4h * 0.985:
+                pct_below_high = (last_close - high_4h) / high_4h * 100
+                return {"signal": Signal.HOLD,
+                        "reason": f"Preis {pct_below_high:+.2f}% am 4h-High {high_4h:.4f} — Peak-Risiko",
+                        "strategy": "gainer"}
+
         return {
             "signal": Signal.BUY,
-            "reason": f"Gainer +{gain_24h:.0f}% 24h | RSI {rsi:.0f} | EMA bullish | 15m grün | vol ok",
+            "reason": f"Gainer +{gain_24h:.0f}% 24h | RSI {rsi:.0f} | EMA bullish | 15m ok | vol ok | <4h-High",
             "rsi": round(rsi, 2),
             "price": round(close.iloc[-1], 8),
             "strategy": "gainer",
