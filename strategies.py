@@ -139,10 +139,33 @@ class GridStrategy:
         signal = Signal.HOLD
         reasons = []
 
+        # 30.04.2026: Grid hatte 0 Filter und kaufte bei JEDEM Step nach unten —
+        # Audit logs.1777541141598.csv zeigt 4/4 Grid-LONGs verloren (-16.34 EUR
+        # realized, 80% des Tagesverlusts). Grid kauft "fallende Messer" wenn
+        # Markt klar bearish ist. Zwei neue Filter:
+        # (a) Trend-Filter: EMA9 darf nicht mehr als 0.5% unter EMA21 liegen
+        #     (kleine Range OK, klar bearish = nicht kaufen)
+        # (b) RSI-Filter: nur Buy wenn RSI < 45 (Oversold-Confirm), nicht bei
+        #     jeder roten Candle.
+        ema_f = ta.trend.EMAIndicator(close, window=9).ema_indicator().iloc[-1]
+        ema_s = ta.trend.EMAIndicator(close, window=21).ema_indicator().iloc[-1]
+        rsi_now = ta.momentum.RSIIndicator(close, window=14).rsi().iloc[-1]
+        trend_too_bearish = ema_s > 0 and (ema_f / ema_s) < 0.995  # >0.5% bearish
+        rsi_too_high_for_buy = rsi_now >= 45
+
         # Buy when price drops by one grid level
         if price_diff <= -step and current_price >= grid["low"]:
+            if trend_too_bearish:
+                return {"signal": Signal.HOLD,
+                        "reason": f"Grid-BUY skip: EMA9 {(ema_f/ema_s-1)*100:+.2f}% unter EMA21 (Trend zu bearish)",
+                        "strategy": "grid"}
+            if rsi_too_high_for_buy:
+                return {"signal": Signal.HOLD,
+                        "reason": f"Grid-BUY skip: RSI {rsi_now:.0f} >= 45 (kein Oversold-Confirm)",
+                        "strategy": "grid"}
             signal = Signal.BUY
-            reasons = [f"Grid buy at {current_price:.2f}", f"dropped {abs(price_diff):.2f}"]
+            reasons = [f"Grid buy at {current_price:.2f}", f"dropped {abs(price_diff):.2f}",
+                       f"RSI {rsi_now:.0f}", f"EMA-Trend ok"]
             grid["last_action_price"] = current_price
             grid["last_action"] = "buy"
 
