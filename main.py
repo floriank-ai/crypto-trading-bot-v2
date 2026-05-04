@@ -272,6 +272,8 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
             trigger_pct = risk_manager.PARTIAL_TP_STAGES[stage_idx][0] * 100
             print(f"  >> PARTIAL-TP stage {stage_idx+1} ({trigger_pct:.1f}%) {symbol} [{direction}]: sell {vol_close:.8f}")
             res = exchange.place_order(symbol, close_side, vol_close, direction=direction)
+            if res["status"] != "ok":
+                print(f"    [PARTIAL-TP] EXEC FAILED {symbol}: {res.get('error', '?')}")
             if res["status"] == "ok":
                 cp = res.get("price", current_price)
                 cost = res.get("cost", vol_close * cp)
@@ -306,6 +308,8 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
             close_side = "buy" if direction == "short" else "sell"
             result = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
 
+            if result["status"] != "ok":
+                print(f"    [{exit_type.upper()}] EXEC FAILED {symbol}: {result.get('error', '?')}")
             if result["status"] == "ok":
                 close_price = result.get("price", current_price)
                 cost = result.get("cost", pos["volume"] * close_price)
@@ -669,8 +673,11 @@ def run_bot():
                     pos_pnl = (cur - pos["entry_price"]) * pos["volume"] if d == "long" else (pos["entry_price"] - cur) * pos["volume"]
 
                     if pos_pnl < 0:
-                        # Verlierer: schliessen
-                        res = exchange.place_order(sym, "sell", pos["volume"])
+                        # Verlierer: schliessen. SHORT braucht buy-to-cover.
+                        close_side = "buy" if d == "short" else "sell"
+                        res = exchange.place_order(sym, close_side, pos["volume"], direction=d)
+                        if res["status"] != "ok":
+                            print(f"    [HWM] EXEC FAILED {sym}: {res.get('error', '?')}")
                         if res["status"] == "ok":
                             p = res.get("price", pos["entry_price"])
                             c = res.get("cost", pos["volume"] * p)
@@ -684,13 +691,15 @@ def run_bot():
                             print(f"    Closed Loser {sym} P&L {pos_pnl:+.2f}EUR")
                         risk_mgr.close_position(sym)
                     else:
-                        # Winner: SL auf Entry +/- 0.3% Puffer ziehen (Break-Even-Lock)
+                        # Winner: SL auf Entry +/- 0.3% Puffer ziehen (Break-Even-Lock).
+                        # Key MUSS "stop_loss" sein — risk_manager.check_exit liest genau das.
+                        # Frueher: pos["sl"] (rein kosmetisch, hat nichts gestoppt).
                         buffer = 0.003
                         new_sl = pos["entry_price"] * (1 + buffer) if d == "long" else pos["entry_price"] * (1 - buffer)
-                        # nur verschieben wenn neuer SL besser ist (fuer long: hoeher, fuer short: niedriger)
-                        old_sl = pos.get("sl", pos["entry_price"])
+                        old_sl = pos["stop_loss"]
                         if (d == "long" and new_sl > old_sl) or (d == "short" and new_sl < old_sl):
-                            pos["sl"] = new_sl
+                            pos["stop_loss"] = new_sl
+                            risk_mgr._save_positions()
                             locked.append(f"{sym} ({pos_pnl:+.2f}EUR)")
                             print(f"    Break-Even-Lock {sym} P&L {pos_pnl:+.2f}EUR, neuer SL={new_sl:.4f}")
                         else:
@@ -908,10 +917,13 @@ def run_bot():
                     pnl_pct = -pnl_pct
                 if abs(pnl_pct) > ts_max_pnl:
                     continue  # Position lebt noch — TP/SL kann greifen
-                # Flatlined → close
+                # Flatlined → close. SHORT braucht buy-to-cover, LONG ein sell.
                 print(f"  [TimeStop] {sym} {d.upper()} {age_h:.1f}h offen, "
                       f"P&L {pnl_pct*100:+.2f}% (innerhalb ±{Config.POSITION_TIME_STOP_MAX_PNL_PCT}%) → Soft-Close")
-                res = exchange.place_order(sym, "sell", pos["volume"])
+                close_side = "buy" if d == "short" else "sell"
+                res = exchange.place_order(sym, close_side, pos["volume"], direction=d)
+                if res["status"] != "ok":
+                    print(f"    [TimeStop] EXEC FAILED {sym}: {res.get('error', '?')}")
                 if res["status"] == "ok":
                     cp = res.get("price", cur)
                     cost = res.get("cost", pos["volume"] * cp)

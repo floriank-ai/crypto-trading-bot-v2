@@ -25,10 +25,16 @@ class RiskManager:
     def get_trading_phase(self, exchange) -> str:
         """
         Phase based on daily P&L vs. 5% target:
-          'aggressive'   → < 2%   : volle Offensive, Rotation aktiv
-          'normal'       → 2-4%   : normal weitermachen
-          'protect'      → 4-5%   : keine neuen Trades, SL nachziehen
+          'protect'      → pnl < 0%       : Drawdown — kein Doppelkick durch Aggression
+          'aggressive'   → 0% - 2%        : volle Offensive, Rotation aktiv
+          'normal'       → 2% - 4%        : normal weitermachen
+          'protect'      → 4% - 5%        : keine neuen Trades, SL nachziehen
         Bei Erreichen von 5%: auto-reset → neues Ziel auf aktuellem Stand.
+
+        Frueher: pnl < 2% → AGGRESSIVE (egal ob Drawdown oder noch nicht hochgekommen).
+        Folge 02.05.2026: nach -20EUR-Hit um 13:55 flippte der Bot von NORMAL auf
+        AGGRESSIVE und blieb 30h+ im Verlust haengen ohne defensive Logik. Jetzt:
+        Drawdown → protect (Bremse, nicht Gas).
         """
         pnl = self.get_daily_pnl_pct(exchange)
         target = Config.DAILY_TARGET_PCT
@@ -39,6 +45,8 @@ class RiskManager:
             return "protect"
         if pnl >= target * 0.40:
             return "normal"
+        if pnl < 0:
+            return "protect"
         return "aggressive"
 
     def reset_daily_target(self, exchange):
@@ -51,12 +59,19 @@ class RiskManager:
 
     # Multi-stage trailing: each tuple is (gain_trigger_pct, new_sl_computation)
     # Earlier/tighter than before — locks small gains before they evaporate.
-    #   +1.5% → SL auf Entry +0.3% (covers Fees von ~0,26% Round-Trip)
+    #   +0.7% → SL auf Entry (cap downside auf Round-Trip-Fees ~0.52%)
+    #   +1.5% → SL auf Entry +0.3% (Break-Even nach Fees)
     #   +3%   → SL lock +1% (ein Drittel des Gewinns sichern)
     #   +5%   → SL lock +2.5% (half-lock)
     #   +8%   → SL trail 3% unter aktuellem Preis
     #   +12%  → SL trail 2% unter aktuellem Preis (tight)
+    #
+    # Lehre 02.05.2026: COMP/CHZ standen bei +3-5% ohne dass jemals bei +1%
+    # geschuetzt wurde. Bei einem 0.7% Reversal verdampft der Buchgewinn 1:1.
+    # Erste Stage (+0.7%) wirft im worst case bei -0.52% (Fees) raus statt
+    # mit 5% ins Minus zu laufen.
     TRAILING_STAGES_LONG = [
+        (0.007, lambda entry, cur: entry * 1.000),
         (0.015, lambda entry, cur: entry * 1.003),
         (0.03,  lambda entry, cur: entry * 1.010),
         (0.05,  lambda entry, cur: entry * 1.025),
@@ -64,6 +79,7 @@ class RiskManager:
         (0.12,  lambda entry, cur: cur   * 0.980),
     ]
     TRAILING_STAGES_SHORT = [
+        (0.007, lambda entry, cur: entry * 1.000),
         (0.015, lambda entry, cur: entry * 0.997),
         (0.03,  lambda entry, cur: entry * 0.990),
         (0.05,  lambda entry, cur: entry * 0.975),

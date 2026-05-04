@@ -17,11 +17,13 @@ class Exchange:
         # Paper trading state — restore from log if available
         self.paper_balance = Config.INITIAL_CAPITAL
         self.paper_positions = {}
+        self.paper_short_positions = {}
         self._markets_loaded = False
         if os.getenv("RESET_PAPER_BALANCE") == "1":
             self._reset_paper_state()
         else:
             self._restore_paper_balance()
+            self._restore_paper_positions()
 
     def _reset_paper_state(self):
         """Hard reset: wipe logs and start fresh with INITIAL_CAPITAL.
@@ -64,6 +66,40 @@ class Exchange:
                 print(f"  [Restore] Paper balance restored: {self.paper_balance:.2f} EUR")
         except Exception as e:
             print(f"  [Restore] Could not restore balance: {e}")
+
+    def _restore_paper_positions(self):
+        """Rebuild paper_positions / paper_short_positions from positions.json.
+
+        Without this, after a Railway redeploy risk_manager.open_positions is
+        loaded from disk but exchange has no record of them — every close
+        order returns 'No short position' / 'Position 0 < volume' silently.
+        That caused 781 silent PARTIAL-TP failures on 2026-05-02/03.
+        """
+        if not Config.is_paper_mode():
+            return
+        pos_path = os.path.join("logs", "positions.json")
+        if not os.path.exists(pos_path):
+            return
+        try:
+            with open(pos_path) as f:
+                positions = json.load(f)
+            restored_long = 0
+            restored_short = 0
+            for sym, p in positions.items():
+                if p.get("direction") == "short":
+                    self.paper_short_positions[sym] = {
+                        "volume": p["volume"],
+                        "entry_price": p["entry_price"],
+                        "margin": p.get("margin", p["entry_price"] * p["volume"] * 0.20),
+                    }
+                    restored_short += 1
+                else:
+                    self.paper_positions[sym] = self.paper_positions.get(sym, 0) + p["volume"]
+                    restored_long += 1
+            if restored_long or restored_short:
+                print(f"  [Restore] Paper positions restored: {restored_long} long, {restored_short} short")
+        except Exception as e:
+            print(f"  [Restore] Could not restore positions: {e}")
 
     def _ensure_markets(self):
         if not self._markets_loaded:
@@ -215,10 +251,18 @@ class Exchange:
                 if symbol not in shorts:
                     return {"status": "error", "error": "No short position"}
                 entry = shorts[symbol]["entry_price"]
-                margin = shorts[symbol]["margin"]
-                pnl = (entry - exec_price) * volume  # Gewinn wenn Preis gefallen
-                self.paper_balance += margin + pnl - fee
-                del shorts[symbol]
+                total_vol = shorts[symbol]["volume"]
+                total_margin = shorts[symbol]["margin"]
+                # Partial close: scale margin/volume by closed fraction
+                close_vol = min(volume, total_vol)
+                fraction = close_vol / total_vol if total_vol > 0 else 1.0
+                margin_freed = total_margin * fraction
+                pnl = (entry - exec_price) * close_vol  # Gewinn wenn Preis gefallen
+                self.paper_balance += margin_freed + pnl - fee
+                shorts[symbol]["volume"] = total_vol - close_vol
+                shorts[symbol]["margin"] = total_margin - margin_freed
+                if shorts[symbol]["volume"] < 0.00000001:
+                    del shorts[symbol]
         else:
             if side == "buy":
                 total = cost + fee
