@@ -51,7 +51,11 @@ class Config:
     # Lehre 25.-27.04.2026: Sentiment hat in 76k Logzeilen NULL profitable Trades
     # erzeugt — Alts (XRP, etc.) reagieren kaum auf News, nur BTC reagiert konsistent.
     # Default BTC-only. ETH bewusst raus (zu viel L2/Narrative-Rauschen).
-    SENTIMENT_WHITELIST = os.getenv("SENTIMENT_WHITELIST", "BTC/EUR").upper().split(",")
+    # 06.05.2026: BTC-only zu eng. Sentiment ist confirm-only (main.py:1233) — d.h.
+    # ein XRP-News-Score +7 dient als STRONG-Boost wenn XRP-Momentum/Grid in selber
+    # Richtung feuert. BTC-Solo-Whitelist verhindert das. Erweitert um ETH+XRP, weil
+    # das die zwei meistgemeldeten Alts in den 25k-Logzeilen sind.
+    SENTIMENT_WHITELIST = os.getenv("SENTIMENT_WHITELIST", "BTC/EUR,ETH/EUR,XRP/EUR").upper().split(",")
     # Mindest-|score|: 27.04.2026 9h Logfenster zeigte: hoechster Score in 9h war 7
     # → Schwelle 8 = Strategie tot. Auf 6 reduziert: in derselben Periode haetten
     # ~192 Signale durchgekonnt, dann filtert TA-Confirm-Gate die unbestaetigten raus.
@@ -61,9 +65,14 @@ class Config:
     # sinkendem Cash → 25 EUR Trades bei 705 EUR Cash). 27.04.2026 Audit: Fees
     # 6.39 EUR vs. Net 5.36 EUR = 54% Fee-Drag — viel zu viel. Bigger Trades = weniger
     # relativer Fee-Drag.
+    # 06.05.2026: NORMAL 100→150, STRONG 200→300. User-Beschwerde: Bot dümpelt
+    # mit +2EUR/Tag rum trotz volatilem Markt. Bei 100EUR Trades sind +5% TP nur
+    # 5EUR brutto / ~3.7EUR netto nach Fees. Größere Sizes verbessern Net-Drag.
+    # Max-Exposure check: 2 STRONG * 300 + 6 NORMAL * 150 = 1500 — bei 1000EUR
+    # Kapital limited durch MAX_OPEN_POSITIONS=12 + Cash-Reserve, real selten >70%.
     POSITION_SIZE_MIN_EUR = float(os.getenv("POSITION_SIZE_MIN_EUR", 50))    # Cash-Reserve-Modus
-    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 100))  # Default
-    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 200))  # Sehr gutes Signal
+    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 150))  # Default
+    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 300))  # Sehr gutes Signal
     # Hard-Reserve fuer Gainer-Strategie (2 Slots * 100 EUR = 200) + 50 EUR Puffer.
     # Wenn Cash darunter → nur Min-Sizing (50 EUR), damit Gainer immer schlagen kann.
     MIN_CASH_RESERVE_EUR = float(os.getenv("MIN_CASH_RESERVE_EUR", 250))
