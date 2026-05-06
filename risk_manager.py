@@ -61,31 +61,33 @@ class RiskManager:
     # ── Trailing Stop-Loss ───────────────────────────────────────────────────
 
     # Multi-stage trailing: each tuple is (gain_trigger_pct, new_sl_computation)
-    # Earlier/tighter than before — locks small gains before they evaporate.
-    #   +0.7% → SL auf Entry (cap downside auf Round-Trip-Fees ~0.52%)
-    #   +1.5% → SL auf Entry +0.3% (Break-Even nach Fees)
-    #   +3%   → SL lock +1% (ein Drittel des Gewinns sichern)
-    #   +5%   → SL lock +2.5% (half-lock)
-    #   +8%   → SL trail 3% unter aktuellem Preis
-    #   +12%  → SL trail 2% unter aktuellem Preis (tight)
     #
-    # Lehre 02.05.2026: COMP/CHZ standen bei +3-5% ohne dass jemals bei +1%
-    # geschuetzt wurde. Bei einem 0.7% Reversal verdampft der Buchgewinn 1:1.
-    # Erste Stage (+0.7%) wirft im worst case bei -0.52% (Fees) raus statt
-    # mit 5% ins Minus zu laufen.
+    # 06.05.2026: Komplett überarbeitet nach Audit der 06.05.-Verluste:
+    # - AAVE LONG hatte +2.78EUR (~+3.5%) Buchgewinn → SL=entry*1.010 lockte
+    #   nur +1%, Markt fiel zurück → ausgestoppt mit +0.85EUR. 70% Profit weg.
+    # - 6 STOP_LOSS vs 1 TAKE_PROFIT in 5h, alle SLs waren BE-Lock-Whipsaws.
+    # - Kern-Diagnose: entry-relative Trails (entry*1.010) sind zu eng, weil
+    #   Crypto 1-2%-Wackler hat. Stattdessen ab Stage 2 PEAK-relativ trailen
+    #   (cur*0.985 = 1.5% unter Peak), das gibt der Position Atem.
+    # - Erste Stage 0.7% komplett raus: nach Fees (~0.52% Round-Trip) ist
+    #   "SL=entry" eine Garantie für Mini-Verlust bei jedem Mikro-Reversal.
+    #
+    #   +1.5% → SL auf Entry +0.3% (Break-Even nach Fees) — bleibt
+    #   +2.5% → SL trail 1.5% unter Peak (statt entry+1%)
+    #   +5%   → SL trail 2.5% unter Peak
+    #   +8%   → SL trail 3% unter Peak
+    #   +12%  → SL trail 2% unter Peak (tight)
     TRAILING_STAGES_LONG = [
-        (0.007, lambda entry, cur: entry * 1.000),
         (0.015, lambda entry, cur: entry * 1.003),
-        (0.03,  lambda entry, cur: entry * 1.010),
-        (0.05,  lambda entry, cur: entry * 1.025),
+        (0.025, lambda entry, cur: cur   * 0.985),
+        (0.05,  lambda entry, cur: cur   * 0.975),
         (0.08,  lambda entry, cur: cur   * 0.970),
         (0.12,  lambda entry, cur: cur   * 0.980),
     ]
     TRAILING_STAGES_SHORT = [
-        (0.007, lambda entry, cur: entry * 1.000),
         (0.015, lambda entry, cur: entry * 0.997),
-        (0.03,  lambda entry, cur: entry * 0.990),
-        (0.05,  lambda entry, cur: entry * 0.975),
+        (0.025, lambda entry, cur: cur   * 1.015),
+        (0.05,  lambda entry, cur: cur   * 1.025),
         (0.08,  lambda entry, cur: cur   * 1.030),
         (0.12,  lambda entry, cur: cur   * 1.020),
     ]
