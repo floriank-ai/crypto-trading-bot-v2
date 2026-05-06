@@ -25,16 +25,19 @@ class RiskManager:
     def get_trading_phase(self, exchange) -> str:
         """
         Phase based on daily P&L vs. 5% target:
-          'protect'      → pnl < 0%       : Drawdown — kein Doppelkick durch Aggression
-          'aggressive'   → 0% - 2%        : volle Offensive, Rotation aktiv
+          'protect'      → pnl <= -1.5%   : echter Drawdown — Bremse, kein Doppelkick
+          'aggressive'   → -1.5% bis 2%   : volle Offensive, Rotation aktiv
           'normal'       → 2% - 4%        : normal weitermachen
           'protect'      → 4% - 5%        : keine neuen Trades, SL nachziehen
         Bei Erreichen von 5%: auto-reset → neues Ziel auf aktuellem Stand.
 
-        Frueher: pnl < 2% → AGGRESSIVE (egal ob Drawdown oder noch nicht hochgekommen).
-        Folge 02.05.2026: nach -20EUR-Hit um 13:55 flippte der Bot von NORMAL auf
-        AGGRESSIVE und blieb 30h+ im Verlust haengen ohne defensive Logik. Jetzt:
-        Drawdown → protect (Bremse, nicht Gas).
+        Verlauf:
+        - Originalcode: pnl < 2% → AGGRESSIVE → bei -20EUR-Hit am 02.05. flippte Bot
+          von NORMAL auf AGGRESSIVE, lief 30h+ im Minus ohne Bremse.
+        - Erster Fix (02.05.): pnl < 0 → PROTECT. Folge 04.05.: bei -0.01% (1€!)
+          stand der Bot 30+ min still, BTC pumpte +0.8% ohne ihn. Zu defensiv.
+        - Jetzt: PROTECT erst bei -1.5% (echter Drawdown), bis dahin AGGRESSIVE
+          mit Anti-Martingale-Sizing (das skaliert eh ab -1% automatisch runter).
         """
         pnl = self.get_daily_pnl_pct(exchange)
         target = Config.DAILY_TARGET_PCT
@@ -45,7 +48,7 @@ class RiskManager:
             return "protect"
         if pnl >= target * 0.40:
             return "normal"
-        if pnl < 0:
+        if pnl <= -1.5:
             return "protect"
         return "aggressive"
 
@@ -379,13 +382,22 @@ class RiskManager:
             print(f"  [Positions] Save error: {e}")
 
     def get_portfolio_value(self, exchange) -> float:
-        """Calculate total portfolio value including open positions."""
+        """Calculate total portfolio value including open positions.
+
+        Bei Ticker-Fail Fallback auf Entry-Price (oder zuletzt bekannten Preis),
+        NICHT die Position einfach ueberspringen — sonst sieht das Portfolio
+        kuenstlich kleiner aus. Folge 04.05.2026: BCH-Ticker-Timeout erzeugte
+        falschen -8.29% Tageslimit-Alarm in Telegram (Position 83EUR fiel raus).
+        """
         total = exchange.get_balance()
         for symbol, pos in self.open_positions.items():
             ticker = exchange.get_ticker(symbol)
-            if not ticker or not ticker.get("last"):
-                continue
-            current_price = ticker["last"]
+            current_price = (ticker or {}).get("last")
+            if not current_price:
+                # Fallback: letzter bekannter Preis oder Entry-Preis
+                current_price = pos.get("last_price", pos["entry_price"])
+            else:
+                pos["last_price"] = current_price  # cache fuer naechstes Mal
             direction = pos.get("direction", "long")
             if direction == "short":
                 pnl = (pos["entry_price"] - current_price) * pos["volume"]
