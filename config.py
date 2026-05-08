@@ -68,11 +68,15 @@ class Config:
     # 06.05.2026: NORMAL 100→150, STRONG 200→300. User-Beschwerde: Bot dümpelt
     # mit +2EUR/Tag rum trotz volatilem Markt. Bei 100EUR Trades sind +5% TP nur
     # 5EUR brutto / ~3.7EUR netto nach Fees. Größere Sizes verbessern Net-Drag.
-    # Max-Exposure check: 2 STRONG * 300 + 6 NORMAL * 150 = 1500 — bei 1000EUR
-    # Kapital limited durch MAX_OPEN_POSITIONS=12 + Cash-Reserve, real selten >70%.
+    # 08.05.2026: NORMAL 150→200, STRONG 300→400. Audit nach Reset: 20 Trades in
+    # 8h erzeugten 6.96EUR Fees auf 1000EUR Kapital → 0.7%/Tag Fee-Drag, größer
+    # als der durchschnittliche Profit. 200EUR Trades bringen Fee-Quote von 0.23%
+    # auf 0.18% pro Trade. STRONG 400 nur bei 2-Strategien-Confluence (selten).
+    # Exposure-check: 2 STRONG * 400 + 5 NORMAL * 200 = 1800 — Cash-Reserve 250
+    # und MAX_OPEN_POSITIONS limitieren in der Praxis.
     POSITION_SIZE_MIN_EUR = float(os.getenv("POSITION_SIZE_MIN_EUR", 50))    # Cash-Reserve-Modus
-    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 150))  # Default
-    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 300))  # Sehr gutes Signal
+    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 200))  # Default
+    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 400))  # Sehr gutes Signal
     # Hard-Reserve fuer Gainer-Strategie (2 Slots * 100 EUR = 200) + 50 EUR Puffer.
     # Wenn Cash darunter → nur Min-Sizing (50 EUR), damit Gainer immer schlagen kann.
     MIN_CASH_RESERVE_EUR = float(os.getenv("MIN_CASH_RESERVE_EUR", 250))
@@ -118,6 +122,13 @@ class Config:
     # Scanner
     SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 50))
     AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 10))
+
+    # Grid-Strategie skipt Coins unter dieser Preisschwelle.
+    # Audit 08.05.2026: AI 0.03EUR, BILL 0.06EUR, BIO 0.04EUR, DOGE 0.09EUR
+    # generierten alle SLs nach Reset. Sub-0.10EUR-Coins haben weite Spreads
+    # und Mikro-Tick-Bewegungen die Grid-TPs/SLs whipsawen. Gainer/Momentum
+    # bleiben unbetroffen — die fangen echte Pumps auch in Penny-Coins.
+    GRID_MIN_PRICE_EUR = float(os.getenv("GRID_MIN_PRICE_EUR", 0.10))
 
     # Gainer Slot (Binance top gainers)
     # WICHTIGE LEHRE 22.04.2026: SPK +50% RSI 79 → -9.02EUR in 20min. Entry-Filter

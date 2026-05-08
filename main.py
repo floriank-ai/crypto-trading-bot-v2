@@ -1161,12 +1161,16 @@ def run_bot():
                             signals.append(sig)
                             print(f"    [momentum] SHORT: {sig['reason']}")
 
-                # Grid
+                # Grid — skipt Sub-Penny-Coins (Spread/Tick-Whipsaw, siehe config.py)
                 if "grid" in active:
-                    sig = grid.analyze(df, symbol)
-                    if sig["signal"] == Signal.BUY:
-                        signals.append(sig)
-                        print(f"    [grid] BUY: {sig['reason']}")
+                    _last_close = float(df["close"].iloc[-1]) if not df.empty else 0
+                    if _last_close < Config.GRID_MIN_PRICE_EUR:
+                        print(f"    [grid] SKIP {symbol} @ {_last_close:.4f}EUR < {Config.GRID_MIN_PRICE_EUR:.2f}EUR Min")
+                    else:
+                        sig = grid.analyze(df, symbol)
+                        if sig["signal"] == Signal.BUY:
+                            signals.append(sig)
+                            print(f"    [grid] BUY: {sig['reason']}")
 
                 # DCA (only for top-scored coins)
                 if "dca" in active:
