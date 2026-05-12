@@ -628,14 +628,19 @@ def run_bot():
             meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
 
             # Proaktives Floor-Tracking (exponentielles Gewinn-Locking):
-            # Tages-Start wird auf Peak*0.97 gezogen (= HWM-Trigger-Linie).
-            # Greift automatisch ab Peak >+3.1% (dann ist Peak*0.97 > Start).
+            # Tages-Start wird auf Peak*0.98 gezogen (= HWM-Trigger-Linie).
+            # Greift automatisch ab Peak >+2.1% (dann ist Peak*0.98 > Start).
             # Konsequenz: TAGESLIMIT (-5%) triggert immer vom aktuellen
             # Gewinn-Niveau aus, nicht vom starren Mitternachts-Wert.
             #
-            # Beispiel: Start 1000, Peak 1070 → Floor 1037.90
-            # → TAGESLIMIT bei 986 statt 950 (32 EUR mehr Schutz).
-            new_base = peak_portfolio * 0.97
+            # Beispiel: Start 1000, Peak 1070 → Floor 1048.60
+            # → TAGESLIMIT bei 996 statt 950 (46 EUR mehr Schutz).
+            #
+            # Fix 11.05.2026 (Bug A): vorher peak*0.97. Mit PROTECT-Schwelle -3.5%
+            # triggerte PROTECT schon bei Pull-Back >6.4% vom Peak — Bot stoppte
+            # Trades trotz absolutem Plus. Auf 0.98 gelockert: PROTECT braucht
+            # jetzt Pull-Back >5.5% vom Peak — 1% mehr Atem für normale Wackler.
+            new_base = peak_portfolio * 0.98
             if new_base > risk_mgr.daily_start_value:
                 print(f"  📈 Floor-Lock: Tages-Start {risk_mgr.daily_start_value:.2f} → {new_base:.2f}EUR (Peak {peak_portfolio:.2f})")
                 risk_mgr.daily_start_value = new_base
@@ -1255,9 +1260,20 @@ def run_bot():
                                   f"keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen")
                             signals.remove(ss)
 
-                # Execute best signal (highest priority: gainer > sentiment > momentum > grid > dca)
+                # Execute best signal.
+                # Priority: gainer > momentum > sentiment > grid > dca
+                #
+                # Fix 11.05.2026 (Bug C): Momentum vor Sentiment gestellt. Vorher:
+                # bei momentum+sentiment-confluence wurde sentiment gewaehlt (priority 4
+                # vs 3). In NEUTRAL ist Sentiment-Bypass an Score>=7 gebunden — schwer.
+                # Momentum-Bypass ist an leverage>=HIGH_CONVICTION_MOMENTUM_LEVERAGE
+                # gebunden — leichter erreichbar. Sentiment kannibalisierte den
+                # bypass-faehigen Momentum-Trade und blockte das ganze Setup.
+                # Jetzt: Momentum gewinnt die Auswahl, Sentiment zaehlt nur noch als
+                # Confluence-Boost (STRONG-Tier, siehe unten). Gainer bleibt oben
+                # (eigener Markt-Kontext), Grid/DCA bleiben hinten (Akkumulation).
                 if signals:
-                    priority = {"gainer": 5, "sentiment": 4, "momentum": 3, "grid": 2, "dca": 1}
+                    priority = {"gainer": 5, "momentum": 4, "sentiment": 3, "grid": 2, "dca": 1}
                     best = max(signals, key=lambda s: priority.get(s.get("strategy", ""), 0))
                     direction = best.get("direction", "long")
                     side = "sell" if direction == "short" else "buy"
