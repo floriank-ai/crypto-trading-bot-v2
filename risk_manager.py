@@ -25,8 +25,8 @@ class RiskManager:
     def get_trading_phase(self, exchange) -> str:
         """
         Phase based on daily P&L vs. 5% target:
-          'protect'      → pnl <= -1.5%   : echter Drawdown — Bremse, kein Doppelkick
-          'aggressive'   → -1.5% bis 2%   : volle Offensive, Rotation aktiv
+          'protect'      → pnl <= -3.5%   : echter Drawdown — Bremse, kein Doppelkick
+          'aggressive'   → -3.5% bis 2%   : volle Offensive, Rotation aktiv
           'normal'       → 2% - 4%        : normal weitermachen
           'protect'      → 4% - 5%        : keine neuen Trades, SL nachziehen
         Bei Erreichen von 5%: auto-reset → neues Ziel auf aktuellem Stand.
@@ -36,8 +36,15 @@ class RiskManager:
           von NORMAL auf AGGRESSIVE, lief 30h+ im Minus ohne Bremse.
         - Erster Fix (02.05.): pnl < 0 → PROTECT. Folge 04.05.: bei -0.01% (1€!)
           stand der Bot 30+ min still, BTC pumpte +0.8% ohne ihn. Zu defensiv.
-        - Jetzt: PROTECT erst bei -1.5% (echter Drawdown), bis dahin AGGRESSIVE
+        - Fix 06.05.: PROTECT erst bei -1.5% (echter Drawdown), bis dahin AGGRESSIVE
           mit Anti-Martingale-Sizing (das skaliert eh ab -1% automatisch runter).
+        - Fix 11.05. (DEADLOCK-BUG): Floor-Lock zieht daily_start_value auf peak*0.97
+          hoch. Ein normaler 2-3% Drawdown vom Peak wird dann als -2.6% Tages-P&L
+          gerechnet → PROTECT triggert → Bot trades nicht mehr → Portfolio kann sich
+          nicht erholen → Mitternacht-Reset zieht Start nur NACH OBEN → Deadlock
+          über mehrere Tage. Beobachtet 11.05.: 11h+ in PROTECT bei -2.61%, 0 Trades.
+          Schwelle daher auf -3.5% gesenkt: ein echter "Doppelkick" sind 3-4%, nicht
+          1.5%. Anti-Martingale bremst bereits ab -1% Position-Size automatisch.
         """
         pnl = self.get_daily_pnl_pct(exchange)
         target = Config.DAILY_TARGET_PCT
@@ -48,7 +55,7 @@ class RiskManager:
             return "protect"
         if pnl >= target * 0.40:
             return "normal"
-        if pnl <= -1.5:
+        if pnl <= -3.5:
             return "protect"
         return "aggressive"
 
