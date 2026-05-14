@@ -36,7 +36,12 @@ class Config:
     # Strategies
     # 28.04.2026: grid dazu — Audit zeigte 75% NEUTRAL-Cycles, Grid ist regime-exempt
     # und confirmt zusätzlich Sentiment-LONG. Mehr Signal-Quellen = mehr 2-3%/Tag-Chancen.
-    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum,sentiment,grid").split(",")
+    # 14.05.2026: Radikale Reduktion. Log 13.05. zeigte: 13 momentum-Sells profitabel,
+    # 2 grid-Sells, Grid erzeugte 1411 SL-Cooldown-Pings für 6 Coins (Whipsaw-Hölle).
+    # Sentiment ist confirm-only und triggert nie alleine → ohne Grid auch nichts zu
+    # confirmen. DCA bleibt eh aus (nicht in Liste). Gainer läuft separat (eigener Slot).
+    # Nur momentum behalten = die einzige Strategie mit dokumentierten Wins im Log.
+    ACTIVE_STRATEGIES = os.getenv("ACTIVE_STRATEGIES", "momentum").split(",")
 
     # High-Conviction-Bypass: in NEUTRAL-Regime werden normalerweise alle Entries
     # geblockt (Whipsaw-Schutz). Wenn ein Signal ABER stark genug ist, darf es trotzdem
