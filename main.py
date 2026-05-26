@@ -1152,6 +1152,18 @@ def run_bot():
                 if df.empty:
                     continue
 
+                # 4h-Trend-Filter (Multi-Timeframe-Confirmation, Variante A, 26.05.2026):
+                # 15m-Setups gegen den 4h-Trend sind statistisch oft Bull/Bear-Traps.
+                # Long-Veto wenn 4h-Trend < -0.5%, Short-Veto wenn > +0.5%.
+                # Dead-Zone (-0.5% .. +0.5%) = Sideways-Markt, beide Richtungen OK.
+                # Lookback: 6 Candles à 4h = 24h Tagestrend.
+                df_4h = exchange.get_ohlcv(symbol, "4h", limit=6)
+                coin_4h_trend = 0.0
+                if not df_4h.empty and len(df_4h) >= 2:
+                    coin_4h_trend = (df_4h["close"].iloc[-1] - df_4h["close"].iloc[0]) / df_4h["close"].iloc[0]
+                allow_coin_long = coin_4h_trend > -0.005
+                allow_coin_short = coin_4h_trend < 0.005
+
                 balance = exchange.get_balance()
                 if balance < 2:
                     print("  Low balance, skipping new trades")
@@ -1168,14 +1180,22 @@ def run_bot():
                     if sig["signal"] == Signal.BUY:
                         if loss_brake:
                             pass  # Verlustbremse: keine Longs
-                        elif not market_bearish:
+                        elif market_bearish:
+                            pass  # BTC-Regime-Gate
+                        elif not allow_coin_long:
+                            print(f"    [momentum] BUY-Veto: 4h-Trend {coin_4h_trend*100:+.2f}% < -0.5% (gegen Tagestrend)")
+                        else:
                             signals.append(sig)
-                            print(f"    [momentum] BUY: {sig['reason']}")
+                            print(f"    [momentum] BUY: {sig['reason']} | 4h {coin_4h_trend*100:+.2f}%")
                     elif sig["signal"] == Signal.SELL:
-                        if not market_bullish:
+                        if market_bullish:
+                            pass  # BTC-Regime-Gate
+                        elif not allow_coin_short:
+                            print(f"    [momentum] SHORT-Veto: 4h-Trend {coin_4h_trend*100:+.2f}% > +0.5% (gegen Tagestrend)")
+                        else:
                             sig["direction"] = "short"
                             signals.append(sig)
-                            print(f"    [momentum] SHORT: {sig['reason']}")
+                            print(f"    [momentum] SHORT: {sig['reason']} | 4h {coin_4h_trend*100:+.2f}%")
 
                 # Grid — skipt Sub-Penny-Coins (Spread/Tick-Whipsaw, siehe config.py)
                 if "grid" in active:
