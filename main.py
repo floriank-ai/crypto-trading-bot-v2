@@ -808,9 +808,12 @@ def run_bot():
                         print(f"  [Regime-Ext] NEUTRAL + BTC 15m {btc_15m_change*100:+.2f}% → unter Schwelle ({Config.NEUTRAL_SHORT_BTC_15M_THRESHOLD*100:.1f}%), Shorts geblockt")
 
             # Marktkontext-Exit: Shorts schließen wenn BTC dreht bullisch
-            # - Verlierer mit >0.5% Minus → cut (Verlust abfedern)
-            # - Gewinner ab +1.5% (nach Fees ~+1%) → lock gain (Profit sichern bevor Trend dreht)
-            # - Positionen im 0/0.5%-Dead-Zone laufen weiter
+            # - NUR Gain-Lock ab +1.5% (nach Fees ~+1%) — Profit sichern bevor Trend dreht
+            # 15.05.2026 (CRITICAL): Loser-Cut bei -0.5% entfernt. Log 14.05. 20:38:08-23
+            # zeigte: 3 LONG-Positionen (DOGE, AAVE, ADA) in 15s force-closed →
+            # -10.75 EUR realized, obwohl alle weit von eigenem SL entfernt waren.
+            # Die positions-eigene SL/Trail-Stop ist die korrekte Loss-Logik, nicht
+            # ein globaler BTC-Schwellwert der korrelierte Panik-Exits triggert.
             if market_bullish:
                 for sym in list(risk_mgr.open_positions.keys()):
                     pos = risk_mgr.open_positions[sym]
@@ -822,9 +825,7 @@ def run_bot():
                     cur = ticker["last"]
                     pnl_pct = (pos["entry_price"] - cur) / pos["entry_price"]
                     reason = None
-                    if pnl_pct < -0.005:
-                        reason = f"Verlust -{abs(pnl_pct)*100:.1f}% abfedern"
-                    elif pnl_pct > 0.015:
+                    if pnl_pct > 0.015:
                         reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
                     if reason:
                         print(f"  [MarktExit] BTC bullisch + {sym} SHORT → {reason}")
@@ -846,8 +847,10 @@ def run_bot():
                             print(f"    Geschlossen: {sym} P&L {pnl:+.2f}EUR")
 
             # Marktkontext-Exit: Longs schließen wenn BTC dreht bearisch
-            # - Verlierer mit >0.5% Minus → cut
-            # - Gewinner ab +1.5% → lock gain
+            # - NUR Gain-Lock ab +1.5% — Profit sichern bevor Trend dreht
+            # 15.05.2026 (CRITICAL): Loser-Cut bei -0.5% entfernt. Siehe Kommentar
+            # bei der bullish-Branche oben. Eigene SL/Trail-Stops sind die richtige
+            # Loss-Logik, nicht ein globaler BTC-Schwellwert.
             if market_bearish:
                 for sym in list(risk_mgr.open_positions.keys()):
                     pos = risk_mgr.open_positions[sym]
@@ -861,9 +864,7 @@ def run_bot():
                     cur = ticker["last"]
                     pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
                     reason = None
-                    if pnl_pct < -0.005:
-                        reason = f"Verlust -{abs(pnl_pct)*100:.1f}% abfedern"
-                    elif pnl_pct > 0.015:
+                    if pnl_pct > 0.015:
                         reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
                     if reason:
                         print(f"  [MarktExit] BTC bearisch + {sym} LONG → {reason}")
@@ -960,12 +961,22 @@ def run_bot():
             if not gainer_slot_occupied:
                 print(f"  [Gainer Slot] Frei ({risk_mgr.MAX_GAINER_POSITIONS-gainer_count} offen) — suche Coin mit >{Config.GAINER_MIN_GAIN_24H:.0f}% 24h Gewinn")
 
-            # Schutz-Phase: keine neuen Trades, bestehende Positionen laufen weiter
+            # Schutz-Phase: bestehende Positionen laufen weiter.
+            # 15.05.2026: Volle Trade-Sperre entfernt. Bot stand tagelang in PROTECT
+            # bei -3.6% während Markt eindeutig bearish war (perfekt für Shorts).
+            # Neue Regel: in PROTECT nur Shorts erlauben WENN Markt bearish/15m-rutsch.
+            # Longs bleiben im PROTECT geblockt (klassische Schutz-Logik). So kann
+            # der Bot sich in Bear-Phasen erholen statt eingefroren zu sein.
+            # TAGESLIMIT bei -5% bleibt der echte Hard-Stop davor.
             if phase == "protect":
-                print(f"  [PROTECT] Nahe am Ziel — keine neuen Trades, Trailing-SL aktiv ({daily_pnl:+.2f}%)")
-                print(f"\n  Next scan in {Config.CHECK_INTERVAL}s...")
-                time.sleep(Config.CHECK_INTERVAL)
-                continue
+                if allow_short_entries:
+                    print(f"  [PROTECT] Tages-P&L {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
+                    allow_long_entries = False
+                else:
+                    print(f"  [PROTECT] Tages-P&L {daily_pnl:+.2f}% — keine neuen Trades (Markt {regime_state}), Trailing-SL aktiv")
+                    print(f"\n  Next scan in {Config.CHECK_INTERVAL}s...")
+                    time.sleep(Config.CHECK_INTERVAL)
+                    continue
 
             # 2. Scan for best coins
             scan_results = scanner.scan()
