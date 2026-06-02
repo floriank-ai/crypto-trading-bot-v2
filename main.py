@@ -968,7 +968,20 @@ def run_bot():
             # Longs bleiben im PROTECT geblockt (klassische Schutz-Logik). So kann
             # der Bot sich in Bear-Phasen erholen statt eingefroren zu sein.
             # TAGESLIMIT bei -5% bleibt der echte Hard-Stop davor.
+            # 02.06.2026 (PROTECT-Escape): Wieder eingefroren bei -4.01% weil Markt
+            # NEUTRAL dümpelte (BTC -0.15% bis -0.30%, nicht <-0.4% für BEARISH und
+            # 15m nicht <-0.5%). In PROTECT lockern wir die Short-Schwelle: schon
+            # ein leicht negativer 15m-Trend (<-0.1%) reicht für Shorts. Klassischer
+            # Recovery-Mechanismus in einem dümpelnden Markt — sonst hängt der Bot
+            # bis Mitternacht-Reset.
             if phase == "protect":
+                if not allow_short_entries:
+                    btc_15m_p = exchange.get_ohlcv("BTC/EUR", "15m", limit=4)
+                    if not btc_15m_p.empty and len(btc_15m_p) >= 2:
+                        chg_p = (btc_15m_p["close"].iloc[-1] - btc_15m_p["close"].iloc[0]) / btc_15m_p["close"].iloc[0]
+                        if chg_p < -0.001:
+                            allow_short_entries = True
+                            print(f"  [PROTECT-Escape] BTC 15m {chg_p*100:+.2f}% < -0.1% → Shorts erlaubt (Recovery-Mode)")
                 if allow_short_entries:
                     print(f"  [PROTECT] Tages-P&L {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
                     allow_long_entries = False
