@@ -79,20 +79,26 @@ class RiskManager:
     # - Erste Stage 0.7% komplett raus: nach Fees (~0.52% Round-Trip) ist
     #   "SL=entry" eine Garantie für Mini-Verlust bei jedem Mikro-Reversal.
     #
-    #   +1.5% → SL auf Entry +0.3% (Break-Even nach Fees) — bleibt
+    #   +1.5% → SL auf Entry +0.6% (ECHTER Break-Even nach Fees) — bleibt
     #   +2.5% → SL trail 1.5% unter Peak (statt entry+1%)
     #   +5%   → SL trail 2.5% unter Peak
     #   +8%   → SL trail 3% unter Peak
     #   +12%  → SL trail 2% unter Peak (tight)
+    #
+    # 10.06.2026 (Bug-Fix): Stage 1 lockte entry*1.003 = +0.3% — UNTER dem
+    # Round-Trip-Fee von ~0.52% (0.26%/Seite). Der Kommentar oben behauptete
+    # "Break-Even nach Fees", lockte aber garantierten Netto-Verlust bei jedem
+    # Mikro-Reversal. Auf 1.006 (+0.6%) angehoben = deckt die Fees echt ab.
+    # Short symmetrisch: 0.997 → 0.994.
     TRAILING_STAGES_LONG = [
-        (0.015, lambda entry, cur: entry * 1.003),
+        (0.015, lambda entry, cur: entry * 1.006),
         (0.025, lambda entry, cur: cur   * 0.985),
         (0.05,  lambda entry, cur: cur   * 0.975),
         (0.08,  lambda entry, cur: cur   * 0.970),
         (0.12,  lambda entry, cur: cur   * 0.980),
     ]
     TRAILING_STAGES_SHORT = [
-        (0.015, lambda entry, cur: entry * 0.997),
+        (0.015, lambda entry, cur: entry * 0.994),
         (0.025, lambda entry, cur: cur   * 1.015),
         (0.05,  lambda entry, cur: cur   * 1.025),
         (0.08,  lambda entry, cur: cur   * 1.030),
@@ -382,11 +388,22 @@ class RiskManager:
         return result
 
     def _save_positions(self):
-        """Persist open positions to disk so restarts don't lose them."""
+        """Persist open positions to disk so restarts don't lose them.
+
+        10.06.2026: Atomares Schreiben (temp-file + os.replace). Vorher konnte ein
+        Crash mitten im json.dump eine truncated positions.json hinterlassen →
+        _restore_paper_positions schlägt fehl → Bot startet mit 0 Positionen während
+        die Exchange-Paper-State sie noch hat → Desync (Wurzel der 781 silent
+        PARTIAL-TP failures 02./03.05.). os.replace ist atomar auf POSIX.
+        """
         os.makedirs("logs", exist_ok=True)
         try:
-            with open(POSITIONS_PATH, "w") as f:
+            tmp_path = POSITIONS_PATH + ".tmp"
+            with open(tmp_path, "w") as f:
                 json.dump(self.open_positions, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, POSITIONS_PATH)
         except Exception as e:
             print(f"  [Positions] Save error: {e}")
 

@@ -58,13 +58,21 @@ class MomentumStrategy:
         reasons = []
         leverage = 1
 
+        # 10.06.2026 (Bug-Fix): leverage war in JEDEM Branch =2. Damit war
+        # HIGH_CONVICTION_MOMENTUM_LEVERAGE wirkungslos: entweder nie aktiv (bei
+        # Schwelle 3) oder IMMER aktiv (bei Schwelle 2 → jedes Momentum-Signal
+        # bypassed das NEUTRAL-Gate, genau die 0/9-Winrate-Trades). Jetzt echte
+        # Qualitäts-Differenzierung:
+        #   lev=3 = Breakout/Breakdown auf neuem 20-Kerzen-Hoch/Tief MIT 1.8x-Volumen
+        #           (echtes Konvictions-Signal, darf NEUTRAL-Gate bypassen)
+        #   lev=2 = RSI-Extrem-Mean-Reversion (in Chop oft Whipsaw → KEIN Bypass)
         if trending:
             # Long: breakout new high + volume
             # Block if >2% above upper BB (overstretched, false-breakout risk)
             if breakout and bullish and price_now <= bb_upper * 1.02:
                 signal = Signal.BUY
                 reasons = ["Breakout new high + volume spike"]
-                leverage = 2
+                leverage = 3
 
             # Long: RSI extreme oversold + EMA bullish + MACD positive
             # Back to 32 (was loosened to 38 -> too early / lower quality).
@@ -79,7 +87,7 @@ class MomentumStrategy:
             elif breakdown and bearish and price_now >= bb_lower * 0.98:
                 signal = Signal.SELL
                 reasons = ["Breakdown new low + volume spike"]
-                leverage = 2
+                leverage = 3
 
             # Short: RSI extreme overbought + EMA bearish + MACD negative
             # Back to 68 (was loosened to 62 -> too early / lower quality).

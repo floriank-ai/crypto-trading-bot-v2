@@ -54,13 +54,15 @@ class Config:
     HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 6))
     # 28.04.2026: 3 von 4 Long-Verlierern waren Bypass-Trades mit lev=2 (Min-Schwelle).
     # Auf 3 angehoben — lev=3 ist seltener aber statistisch belastbar.
-    # Fix 11.05.2026 (Bug E): Momentum-Strategie liefert in strategies.py NUR lev=2,
-    # nie lev=3. Schwelle auf 3 = Bypass nie aktiv = in NEUTRAL trades nie Momentum.
-    # Bot war oft "still" weil ~52% der Zeit NEUTRAL ist. Auf 2 zurueckgesetzt mit
-    # Schutz: lev=2 ist die einzige Momentum-Stufe (Breakout+Vol oder RSI-Extrem,
-    # beides sind hochwertige Setups). Anti-Martingale-Sizing bremst Verluste eh.
+    # Fix 11.05.2026 (Bug E): Momentum-Strategie lieferte in strategies.py NUR lev=2,
+    # nie lev=3. Schwelle auf 3 = Bypass nie aktiv. Damals auf 2 gesenkt — aber dann
+    # bypassed JEDES Momentum-Signal (RSI-Mean-Reversion inkl.) das NEUTRAL-Gate.
+    # Fix 10.06.2026: strategies.py gibt jetzt lev=3 NUR für Breakout/Breakdown+Volumen
+    # (echtes Konvictions-Signal), lev=2 für RSI-Extrem. Schwelle zurück auf 3 →
+    # nur der Breakout darf NEUTRAL bypassen, die Whipsaw-anfällige Mean-Reversion
+    # nicht mehr. Genau die selektive Logik, die das Gate ursprünglich wollte.
     # Lehre 28.04. bleibt: Bypass NUR in NEUTRAL, nie gegen BULLISH/BEARISH-Trend.
-    HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 2))
+    HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 3))
 
     # Sentiment-Whitelist: nur diese Symbole duerfen ueber Sentiment getradet werden.
     # Lehre 25.-27.04.2026: Sentiment hat in 76k Logzeilen NULL profitable Trades

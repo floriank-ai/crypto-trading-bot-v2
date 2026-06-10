@@ -542,6 +542,8 @@ def run_bot():
     # damit do_reset() sie clearen kann. Hier nur als Marker-Kommentar.
     today = datetime.now().date()
     last_report_hour = -1  # Stunde des letzten 4h-Berichts
+    error_streak = 0       # konsekutive Fehler-Cycles (für Backoff + Alert)
+    last_error_cycle = -10 # Cycle-Nr des letzten Fehlers
 
     while True:
         try:
@@ -627,24 +629,20 @@ def run_bot():
             drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
             meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
 
-            # Proaktives Floor-Tracking (exponentielles Gewinn-Locking):
-            # Tages-Start wird auf Peak*0.98 gezogen (= HWM-Trigger-Linie).
-            # Greift automatisch ab Peak >+2.1% (dann ist Peak*0.98 > Start).
-            # Konsequenz: TAGESLIMIT (-5%) triggert immer vom aktuellen
-            # Gewinn-Niveau aus, nicht vom starren Mitternachts-Wert.
-            #
-            # Beispiel: Start 1000, Peak 1070 → Floor 1048.60
-            # → TAGESLIMIT bei 996 statt 950 (46 EUR mehr Schutz).
-            #
-            # Fix 11.05.2026 (Bug A): vorher peak*0.97. Mit PROTECT-Schwelle -3.5%
-            # triggerte PROTECT schon bei Pull-Back >6.4% vom Peak — Bot stoppte
-            # Trades trotz absolutem Plus. Auf 0.98 gelockert: PROTECT braucht
-            # jetzt Pull-Back >5.5% vom Peak — 1% mehr Atem für normale Wackler.
-            new_base = peak_portfolio * 0.98
-            if new_base > risk_mgr.daily_start_value:
-                print(f"  📈 Floor-Lock: Tages-Start {risk_mgr.daily_start_value:.2f} → {new_base:.2f}EUR (Peak {peak_portfolio:.2f})")
-                risk_mgr.daily_start_value = new_base
-                tageslimit_alerted_today = False  # neuer Trigger fuer neues Level moeglich
+            # 10.06.2026 (DEADLOCK-FIX): Floor-Lock ENTFERNT.
+            # Früher wurde daily_start_value auf peak*0.98 hochgezogen. Das war die
+            # dokumentierte Deadlock-Wurzel (risk_manager.py:41-47): ein normaler
+            # 2-3% Pullback vom Peak wurde dann als negativer Tages-P&L gerechnet →
+            # PROTECT triggerte → Bot fror ein → konnte sich nicht erholen → Mitternacht
+            # zog Start nur nach oben → tagelanger Deadlock. Wiederholt gepatcht
+            # (peak*0.97 → 0.98, PROTECT-Schwelle → -3.5%, PROTECT-Escape) — alles
+            # Symptom-Behandlung.
+            # Gewinn-Schutz übernimmt die HWM-Logik unten (drawdown_from_peak >= 3%):
+            # sie schließt Verlierer + Break-Even-lockt Gewinner bei 3% Pullback vom
+            # Peak — enger und sauberer als der Floor-Lock je war. daily_start_value
+            # bewegt sich jetzt NUR noch über Mitternacht-Reset und 5%-Ziel-Reset
+            # (beides stabile, bewusste Anker). Phase-Logik wird dadurch stabil,
+            # PROTECT misst echten Drawdown vom Tagesstart statt Phantom-Verlust vom Peak.
 
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
@@ -696,10 +694,12 @@ def run_bot():
                             print(f"    Closed Loser {sym} P&L {pos_pnl:+.2f}EUR")
                         risk_mgr.close_position(sym)
                     else:
-                        # Winner: SL auf Entry +/- 0.3% Puffer ziehen (Break-Even-Lock).
+                        # Winner: SL auf Entry +/- 0.6% Puffer ziehen (Break-Even-Lock).
                         # Key MUSS "stop_loss" sein — risk_manager.check_exit liest genau das.
                         # Frueher: pos["sl"] (rein kosmetisch, hat nichts gestoppt).
-                        buffer = 0.003
+                        # 10.06.2026: 0.003 → 0.006. +0.3% deckte das 0.52%-Round-Trip-Fee
+                        # nicht → "Break-Even-Lock" war Netto-Verlust-Lock. 0.6% deckt Fees.
+                        buffer = 0.006
                         new_sl = pos["entry_price"] * (1 + buffer) if d == "long" else pos["entry_price"] * (1 - buffer)
                         old_sl = pos["stop_loss"]
                         if (d == "long" and new_sl > old_sl) or (d == "short" and new_sl < old_sl):
@@ -1504,11 +1504,28 @@ def run_bot():
             sys.exit(0)
 
         except Exception as e:
-            print(f"\n  ERROR: {e}")
+            # 10.06.2026: Resilienz statt blindem 30s-Retry-Loop. Vorher konnte ein
+            # persistenter Fehler (korrupter State, Schema-Change) ewig im 30s-Takt
+            # loopen während der Markt lief — niemand wurde alarmiert. Jetzt: konsekutive
+            # Fehler (Cycle für Cycle) zählen → exponentielles Backoff (30s→max 10min)
+            # + EINMALIGER Telegram-Alert ab 3 Fehlern in Folge. Erholt sich der Bot
+            # (erfolgreicher Cycle dazwischen), resettet der Streak automatisch.
             import traceback
+            if cycle == last_error_cycle + 1:
+                error_streak += 1
+            else:
+                error_streak = 1
+            last_error_cycle = cycle
+            print(f"\n  ERROR (Streak {error_streak}): {e}")
             traceback.print_exc()
-            print(f"  Retrying in 30s...")
-            time.sleep(30)
+            if error_streak == 3:
+                try:
+                    notifier.send(f"⚠️ *BOT-FEHLER*\n{error_streak}x in Folge:\n`{str(e)[:200]}`\nBackoff aktiv, versuche Recovery.")
+                except Exception:
+                    pass
+            backoff = min(30 * (2 ** (error_streak - 1)), 600)  # 30→60→120→…→max 600s
+            print(f"  Retrying in {backoff}s...")
+            time.sleep(backoff)
 
 
 if __name__ == "__main__":
