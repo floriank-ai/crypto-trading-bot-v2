@@ -47,7 +47,11 @@ class Config:
     # geblockt (Whipsaw-Schutz). Wenn ein Signal ABER stark genug ist, darf es trotzdem
     # durch. Schwellen kalibriert auf Log-Daten 25.04.: typische Sentiment-Scores 5-8,
     # XRP-/SCAM-Crashes oft -6 bis -8.
-    HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 7))
+    # 09.06.2026: 7→6. User-Beschwerde: XRP-News-Score +7 wurde geloggt, kein Trade.
+    # Score 6 ist häufiger im 9h-Fenster (Audit-Daten 27.04.) — mehr NEUTRAL-Bypass-
+    # Chancen für Sentiment-BUY auf BTC/ETH/XRP. Risiko: NEUTRAL-Longs hatten historisch
+    # 0/9 Winrate, aber NUR ohne Bypass — hier nur stark-confirmte Setups durch.
+    HIGH_CONVICTION_SENTIMENT_SCORE = int(os.getenv("HIGH_CONVICTION_SENTIMENT_SCORE", 6))
     # 28.04.2026: 3 von 4 Long-Verlierern waren Bypass-Trades mit lev=2 (Min-Schwelle).
     # Auf 3 angehoben — lev=3 ist seltener aber statistisch belastbar.
     # Fix 11.05.2026 (Bug E): Momentum-Strategie liefert in strategies.py NUR lev=2,
