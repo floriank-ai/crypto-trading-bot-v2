@@ -14,6 +14,10 @@ class RiskManager:
         self.max_positions = Config.MAX_OPEN_POSITIONS
         self.open_positions = {}
         self.daily_start_value = Config.INITIAL_CAPITAL
+        # 11.06.2026 — mitziehender Kapital-Boden (Option B). Steigt mit echtem
+        # Kapitalwachstum (peak*(1-BAND)), fällt nie unter INITIAL_CAPITAL.
+        # Wird in main.py nach jedem Peak-Update hochgeratscht.
+        self.capital_floor = Config.INITIAL_CAPITAL
 
     # ── Tages-Ziel ──────────────────────────────────────────────────────────
 
@@ -21,6 +25,17 @@ class RiskManager:
         """Current P&L vs. daily start value in percent."""
         current = self.get_portfolio_value(exchange)
         return (current - self.daily_start_value) / self.daily_start_value * 100
+
+    def get_capital_pnl_pct(self, exchange) -> float:
+        """P&L vs. dem mitziehenden Kapital-Boden in Prozent.
+
+        Das ist die ECHTE Schutz-Metrik: solange portfolio > capital_floor steht,
+        ist real kein Kapital verloren (nur Buchgewinn vom Peak abgegeben). Nur
+        wenn diese Zahl < 0 wird, ist echtes Startkapital/gesicherter Gewinn weg.
+        """
+        floor = max(self.capital_floor, 1e-9)
+        current = self.get_portfolio_value(exchange)
+        return (current - floor) / floor * 100
 
     def get_trading_phase(self, exchange) -> str:
         """
@@ -55,7 +70,13 @@ class RiskManager:
             return "protect"
         if pnl >= target * 0.40:
             return "normal"
-        if pnl <= -3.5:
+        # 11.06.2026 (Option B): Low-Side jetzt KAPITAL-relativ statt Tages-relativ.
+        # Der alte -3.5%-Tages-Trigger fror den Bot ein, sobald der hochgeratschte
+        # Tages-Anker einen normalen Peak-Drawdown als -3.5% verbuchte — obwohl
+        # netto klar im Plus. Jetzt: PROTECT nur, wenn der Puffer ÜBER dem echten
+        # Kapital-Boden ins Schutzband fällt (cap_pnl < CAPITAL_PROTECT_PCT).
+        cap_pnl = self.get_capital_pnl_pct(exchange)
+        if cap_pnl < Config.CAPITAL_PROTECT_PCT:
             return "protect"
         return "aggressive"
 

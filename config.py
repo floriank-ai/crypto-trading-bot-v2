@@ -18,6 +18,17 @@ class Config:
     TRADING_MODE = os.getenv("TRADING_MODE", "paper")
     INITIAL_CAPITAL = float(os.getenv("INITIAL_CAPITAL", 1000))
 
+    # 11.06.2026 — Kapital-Schutz statt Tages-P&L-Freeze (Option B, User-Entscheid).
+    # Bot fror bei -6% vom hochgeratschten Tages-Anker ein, obwohl netto im Plus.
+    # Jetzt: mitziehender Kapital-Boden capital_floor = max(INITIAL, peak*(1-BAND)),
+    # sinkt nie, zieht mit echtem Kapitalwachstum hoch. Freeze NUR unter dem Boden.
+    # BAND = wie viel % Buchgewinn vom Peak abgegeben werden darf, bevor der Boden
+    # greift (über INITIAL). 0.08 = 8% — HWM trimmt eh schon ab 3% Drawdown.
+    CAPITAL_TRAIL_BAND = float(os.getenv("CAPITAL_TRAIL_BAND", 0.08))
+    # Schutz-Puffer ÜBER dem Boden: in diesem Band (in %) werden Longs blockiert
+    # (nur Shorts), aber kein Hard-Freeze. 0 = binär (über Boden voll traden).
+    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", 1.0))
+
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))
     STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.04))

@@ -629,6 +629,18 @@ def run_bot():
             drawdown_from_peak = (peak_portfolio - portfolio_val) / peak_portfolio * 100
             meaningful_gain = peak_portfolio > Config.INITIAL_CAPITAL * 1.03  # mind. 3% Gewinn gehabt
 
+            # 11.06.2026 (Option B): mitziehender Kapital-Boden hochratschen.
+            # Steigt mit echtem Kapitalwachstum (peak abzüglich Trail-Band), sinkt NIE
+            # und nie unter INITIAL_CAPITAL. Das ist der einzige Anker für den echten
+            # Kapital-Schutz — entkoppelt vom hochratschenden daily_start_value, der
+            # den Bot früher einfror, obwohl netto im Plus.
+            risk_mgr.capital_floor = max(
+                risk_mgr.capital_floor,
+                Config.INITIAL_CAPITAL,
+                peak_portfolio * (1 - Config.CAPITAL_TRAIL_BAND),
+            )
+            cap_pnl = risk_mgr.get_capital_pnl_pct(exchange)
+
             # 10.06.2026 (DEADLOCK-FIX): Floor-Lock ENTFERNT.
             # Früher wurde daily_start_value auf peak*0.98 hochgezogen. Das war die
             # dokumentierte Deadlock-Wurzel (risk_manager.py:41-47): ein normaler
@@ -646,14 +658,18 @@ def run_bot():
 
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
-            print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% [{phase.upper()}]")
+            print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% | Kapital-P&L: {cap_pnl:+.2f}% (Boden {risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
 
-            # Tageslimit: bei -5% vom (evtl nachgezogenen) Tages-Start keine neuen Trades bis Mitternacht
-            # Telegram nur EINMAL pro Tag (nicht bei jeder Cycle spammen)
-            if daily_pnl < -5.0:
-                print(f"  🛑 TAGESLIMIT -5% ({daily_pnl:.2f}%) — pausiere bis Mitternacht")
+            # 11.06.2026 (Option B): KAPITAL-STOP statt Tages-P&L-Freeze.
+            # Freeze NUR, wenn das Portfolio real unter den mitziehenden Kapital-Boden
+            # fällt (echter Kapitalverlust). Solange portfolio >= capital_floor steht,
+            # läuft der Bot weiter — auch wenn er intraday Buchgewinn vom Peak abgibt.
+            # Kein Mitternacht-Wait: sobald sich das Portfolio über den Boden erholt,
+            # läuft er sofort wieder (der Boden sinkt nie, also kein Deadlock).
+            if portfolio_val < risk_mgr.capital_floor:
+                print(f"  🛑 KAPITAL-STOP: Portfolio {portfolio_val:.2f} < Boden {risk_mgr.capital_floor:.2f}EUR ({cap_pnl:.2f}%) — pausiere bis Erholung")
                 if not tageslimit_alerted_today:
-                    notifier.send(f"🛑 *TAGESLIMIT erreicht*\n{daily_pnl:.2f}% vom Tages-Boden ({risk_mgr.daily_start_value:.2f}EUR)\nKeine neuen Trades bis Mitternacht")
+                    notifier.send(f"🛑 *KAPITAL-STOP*\nPortfolio `{portfolio_val:.2f}EUR` unter Kapital-Boden `{risk_mgr.capital_floor:.2f}EUR` ({cap_pnl:.2f}%)\nKeine neuen Trades bis Erholung über den Boden")
                     tageslimit_alerted_today = True
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
@@ -885,10 +901,14 @@ def run_bot():
                             notifier.notify_exit(sym, "market_context_exit", pnl, pos["strategy"], port_val, d_pnl)
                             print(f"    Geschlossen: {sym} P&L {pnl:+.2f}EUR")
 
-            # Fix 3: Verlustbremse — bei -3% Tages-P&L keine neuen Longs
-            loss_brake = daily_pnl < -3.0
+            # Fix 3: Verlustbremse — jetzt KAPITAL-relativ (Option B, 11.06.2026).
+            # Greift, wenn der Puffer über dem Kapital-Boden ins Schutzband fällt
+            # (cap_pnl < CAPITAL_PROTECT_PCT) statt bei -3% vom hochgeratschten
+            # Tages-Anker. Dann nur noch Shorts — Longs würden gegen den Drawdown
+            # arbeiten. Synchron zur PROTECT-Phase in get_trading_phase.
+            loss_brake = cap_pnl < Config.CAPITAL_PROTECT_PCT
             if loss_brake:
-                print(f"  ⚠️  VERLUSTBREMSE aktiv ({daily_pnl:.2f}%) — nur Shorts erlaubt")
+                print(f"  ⚠️  VERLUSTBREMSE aktiv (Kapital-P&L {cap_pnl:.2f}% < {Config.CAPITAL_PROTECT_PCT:.1f}%) — nur Shorts erlaubt")
 
             # 1. Check exits first
             exits = check_exits(exchange, risk_mgr, logger, notifier,
