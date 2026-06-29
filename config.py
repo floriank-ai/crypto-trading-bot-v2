@@ -28,6 +28,14 @@ class Config:
     # Schutz-Puffer ÜBER dem Boden: in diesem Band (in %) werden Longs blockiert
     # (nur Shorts), aber kein Hard-Freeze. 0 = binär (über Boden voll traden).
     CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", 1.0))
+    # 15.06.2026 — Zwei-Stufen-Schutz statt Hard-Freeze-Deadlock.
+    # PROBLEM: Unter dem Boden machte der Bot sleep+continue → check_exits wurde
+    # übersprungen → offene Positionen wurden NICHT mehr gemanagt (keine SL/TP)
+    # und es lief gar nichts mehr → Deadlock bei 980 (unter Boden 1000).
+    # NEU: Soft-Zone (unter Boden, aber über Hard-Stop) = nur Shorts + Exits laufen
+    # weiter → Bot kann sich rausarbeiten. Hard-Freeze ERST bei echtem Absturz
+    # CAPITAL_HARD_STOP_PCT % unter dem Boden (Katastrophenschutz).
+    CAPITAL_HARD_STOP_PCT = float(os.getenv("CAPITAL_HARD_STOP_PCT", 5.0))
 
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))

@@ -660,19 +660,26 @@ def run_bot():
             phase = risk_mgr.get_trading_phase(exchange)
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% | Kapital-P&L: {cap_pnl:+.2f}% (Boden {risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
 
-            # 11.06.2026 (Option B): KAPITAL-STOP statt Tages-P&L-Freeze.
-            # Freeze NUR, wenn das Portfolio real unter den mitziehenden Kapital-Boden
-            # fällt (echter Kapitalverlust). Solange portfolio >= capital_floor steht,
-            # läuft der Bot weiter — auch wenn er intraday Buchgewinn vom Peak abgibt.
-            # Kein Mitternacht-Wait: sobald sich das Portfolio über den Boden erholt,
-            # läuft er sofort wieder (der Boden sinkt nie, also kein Deadlock).
-            if portfolio_val < risk_mgr.capital_floor:
-                print(f"  🛑 KAPITAL-STOP: Portfolio {portfolio_val:.2f} < Boden {risk_mgr.capital_floor:.2f}EUR ({cap_pnl:.2f}%) — pausiere bis Erholung")
+            # 11.06.2026 (Option B) / 15.06.2026 (Zwei-Stufen-Fix): KAPITAL-Schutz.
+            # Stufe 1 — SOFT (portfolio < capital_floor, aber >= hard_stop_floor):
+            #   KEIN Hard-Freeze. Der Bot läuft weiter, managt Exits (check_exits unten)
+            #   und darf via VERLUSTBREMSE nur Shorts öffnen → kann sich aktiv zurück
+            #   über den Boden arbeiten. Früher fror er hier komplett ein (sleep+continue),
+            #   übersprang sogar check_exits → offene Positionen unverwaltet → Deadlock.
+            # Stufe 2 — HARD (portfolio < hard_stop_floor): echter Absturz CAPITAL_HARD_STOP_PCT%
+            #   unter dem Boden → Vollstopp (Katastrophenschutz), bis Erholung über den Hard-Stop.
+            hard_stop_floor = risk_mgr.capital_floor * (1 - Config.CAPITAL_HARD_STOP_PCT / 100)
+            if portfolio_val < hard_stop_floor:
+                print(f"  🛑 KAPITAL-HARD-STOP: Portfolio {portfolio_val:.2f} < Hard-Stop {hard_stop_floor:.2f}EUR ({cap_pnl:.2f}%) — Vollstopp bis Erholung")
                 if not tageslimit_alerted_today:
-                    notifier.send(f"🛑 *KAPITAL-STOP*\nPortfolio `{portfolio_val:.2f}EUR` unter Kapital-Boden `{risk_mgr.capital_floor:.2f}EUR` ({cap_pnl:.2f}%)\nKeine neuen Trades bis Erholung über den Boden")
+                    notifier.send(f"🛑 *KAPITAL-HARD-STOP*\nPortfolio `{portfolio_val:.2f}EUR` unter Hard-Stop `{hard_stop_floor:.2f}EUR` ({cap_pnl:.2f}%)\nVollstopp bis Erholung (Boden {risk_mgr.capital_floor:.2f})")
                     tageslimit_alerted_today = True
                 time.sleep(Config.CHECK_INTERVAL)
                 continue
+            if portfolio_val < risk_mgr.capital_floor:
+                # Soft-Zone: nur informativ — VERLUSTBREMSE (cap_pnl<PROTECT_PCT) blockt
+                # unten die neuen Longs, Shorts + Exit-Management laufen normal weiter.
+                print(f"  ⚠️  KAPITAL-SCHUTZ (soft): Portfolio {portfolio_val:.2f} < Boden {risk_mgr.capital_floor:.2f}EUR ({cap_pnl:.2f}%) — nur Shorts, Exits aktiv, Hard-Stop bei {hard_stop_floor:.2f}")
 
             # High-Water-Mark: Peak tracken und Gewinn sichern
             # NEUE LOGIK (nach Blutbad 18.04.): close-all realisierte -8.5% Tages-P&L
