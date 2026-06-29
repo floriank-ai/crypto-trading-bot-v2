@@ -26,8 +26,13 @@ class Config:
     # greift (über INITIAL). 0.08 = 8% — HWM trimmt eh schon ab 3% Drawdown.
     CAPITAL_TRAIL_BAND = float(os.getenv("CAPITAL_TRAIL_BAND", 0.08))
     # Schutz-Puffer ÜBER dem Boden: in diesem Band (in %) werden Longs blockiert
-    # (nur Shorts), aber kein Hard-Freeze. 0 = binär (über Boden voll traden).
-    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", 1.0))
+    # (nur Shorts), aber kein Hard-Freeze.
+    # 29.06.2026 — Default 1.0 → 0.0. Bei 1.0 startete der Bot nach einem Reset
+    # (Portfolio = Boden = 1000, cap_pnl = 0%) SOFORT in "nur Shorts" und durfte
+    # erst Longs ab +1% (1010) handeln → im Bull-Markt gelähmt. 0 = binär:
+    # am/über dem Boden voll traden (Longs+Shorts), erst UNTER dem Boden nur Shorts.
+    # Das tote Band ist redundant — der Boden trailt eh 8% unter Peak, HWM ab 3%.
+    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", 0.0))
     # 15.06.2026 — Zwei-Stufen-Schutz statt Hard-Freeze-Deadlock.
     # PROBLEM: Unter dem Boden machte der Bot sleep+continue → check_exits wurde
     # übersprungen → offene Positionen wurden NICHT mehr gemanagt (keine SL/TP)
