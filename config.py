@@ -53,7 +53,10 @@ class Config:
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
     # Anti-Churn: max N Trades pro Symbol pro Tag. Verhindert Whipsaw wie bei
     # M/EUR (21.04.: 7 Einstiege/Ausstiege, ~14 EUR Fees, netto -X). Reset Mitternacht.
-    MAX_TRADES_PER_SYMBOL_PER_DAY = int(os.getenv("MAX_TRADES_PER_SYMBOL_PER_DAY", 3))
+    # 24.06.2026: 3→2. Fee-Audit: 18 Trades = 10.44 EUR Fees auf 1000 EUR (>50% des
+    # Realized-Loss). Jeder Re-Entry kostet ~0.52% Round-Trip. 2/Tag/Symbol = weniger
+    # Whipsaw-Re-Entries, der Gewinner muss die Gebuehr wirklich ueberspringen.
+    MAX_TRADES_PER_SYMBOL_PER_DAY = int(os.getenv("MAX_TRADES_PER_SYMBOL_PER_DAY", 2))
     ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
@@ -129,14 +132,21 @@ class Config:
     # ±Y% → Soft-Close. 27.04.2026: 4 SHORTs hingen 8h+ ohne Bewegung, blockierten
     # Slots fuer 37 weitere Setups.
     POSITION_TIME_STOP_HOURS = float(os.getenv("POSITION_TIME_STOP_HOURS", 4.0))
-    POSITION_TIME_STOP_MAX_PNL_PCT = float(os.getenv("POSITION_TIME_STOP_MAX_PNL_PCT", 1.0))
+    # 24.06.2026: 1.0→0.5. Fee-Drag-Fix: ein Time-Stop bei +0.7% Brutto ist nach
+    # 0.52% Round-Trip-Fee netto NEGATIV. Engeres Band = nur wirklich tote Positionen
+    # (±0.5%) werden geflusht; eine die noch +0.7% laeuft darf Richtung TP weiter,
+    # statt mit Fee-Verlust geschlossen zu werden.
+    POSITION_TIME_STOP_MAX_PNL_PCT = float(os.getenv("POSITION_TIME_STOP_MAX_PNL_PCT", 0.5))
 
     # Win-Cooldown: nach profitablem Exit X Stunden Pause fuer dasselbe Symbol.
     # ORCA 27.04.: Win +7.02, dann 2.5h spaeter Re-Entry → SL -4.98. Erstes Setup
     # war durch, wir sollten nicht direkt wieder rein.
     # 29.04.2026: 2h hat 393 Re-Entries blockiert. Auf 0.5h (30min) reduziert —
     # genug um Whipsaw zu verhindern, kurz genug um neue Setups nicht zu killen.
-    WIN_COOLDOWN_HOURS = float(os.getenv("WIN_COOLDOWN_HOURS", 0.5))
+    # 24.06.2026: 0.5→1.5h. Fee-Drag-Fix: 30min war zu kurz, das Symbol re-triggerte
+    # haeufig direkt im selben Move → zweiter Trade frass Fees ohne neuen Edge. 1.5h
+    # laesst den Move erst auslaufen, bevor wir dasselbe Symbol nochmal anfassen.
+    WIN_COOLDOWN_HOURS = float(os.getenv("WIN_COOLDOWN_HOURS", 1.5))
 
     # NEUTRAL-Short-Gate: in NEUTRAL-Regime werden Shorts nur erlaubt, wenn BTC 15m
     # mindestens X% nachgibt. 28.04.2026 Audit: btc_15m < 0 (alles unter 0%) hat 4

@@ -75,9 +75,11 @@ class MomentumStrategy:
                 leverage = 3
 
             # Long: RSI extreme oversold + EMA bullish + MACD positive
-            # Back to 32 (was loosened to 38 -> too early / lower quality).
+            # 24.06.2026: 32→30. Fee-Drag-Fix: die Mean-Reversion-Branch ist die
+            # whipsaw-anfaelligste (lev=2, kein NEUTRAL-Bypass). Tieferes Extrem =
+            # weniger, aber konvinktere Entries, die die 0.52% Round-Trip-Fee schaffen.
             # Only buy when price is still below/at the BB midpoint (really cheap)
-            elif current_rsi < 32 and bullish and macd_hist > 0 and price_now <= bb_middle:
+            elif current_rsi < 30 and bullish and macd_hist > 0 and price_now <= bb_middle:
                 signal = Signal.BUY
                 reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
                 leverage = 2
@@ -90,9 +92,10 @@ class MomentumStrategy:
                 leverage = 3
 
             # Short: RSI extreme overbought + EMA bearish + MACD negative
-            # Back to 68 (was loosened to 62 -> too early / lower quality).
+            # 24.06.2026: 68→70. Symmetrisch zum Long-Branch — nur tiefere Extreme
+            # durch, weniger Whipsaw-Shorts die nur Fees kosten.
             # Only short when price is still above/at the BB midpoint
-            elif current_rsi > 68 and bearish and macd_hist < 0 and price_now >= bb_middle:
+            elif current_rsi > 70 and bearish and macd_hist < 0 and price_now >= bb_middle:
                 signal = Signal.SELL
                 reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
                 leverage = 2
