@@ -725,10 +725,17 @@ def run_bot():
                     mins_left = (hard_stop_resume_at - time.time()) / 60
                     print(f"  🛑 HARD-STOP-Pause: noch {mins_left:.0f}min ohne neue Entries "
                           f"(Exits laufen, Portfolio {portfolio_val:.2f}EUR)")
-            if portfolio_val < risk_mgr.capital_floor:
+            # 08.10.2026: Schwelle an CAPITAL_PROTECT_PCT angeglichen. Vorher meldete
+            # diese Zeile "nur Shorts" schon bei portfolio < Boden, während die
+            # VERLUSTBREMSE unten erst bei cap_pnl < CAPITAL_PROTECT_PCT greift.
+            # Seit das Toleranzband negativ ist (-0.25%), wären die beiden sonst
+            # auseinandergelaufen und das Log hätte einen Schutz gemeldet, der
+            # gar nicht aktiv ist.
+            soft_protect_floor = risk_mgr.capital_floor * (1 + Config.CAPITAL_PROTECT_PCT / 100)
+            if portfolio_val < soft_protect_floor:
                 # Soft-Zone: nur informativ — VERLUSTBREMSE (cap_pnl<PROTECT_PCT) blockt
                 # unten die neuen Longs, Shorts + Exit-Management laufen normal weiter.
-                print(f"  ⚠️  KAPITAL-SCHUTZ (soft): Portfolio {portfolio_val:.2f} < Boden {risk_mgr.capital_floor:.2f}EUR ({cap_pnl:.2f}%) — nur Shorts, Exits aktiv, Hard-Stop bei {hard_stop_floor:.2f}")
+                print(f"  ⚠️  KAPITAL-SCHUTZ (soft): Portfolio {portfolio_val:.2f} < Schwelle {soft_protect_floor:.2f}EUR (Boden {risk_mgr.capital_floor:.2f}, {cap_pnl:.2f}%) — nur Shorts, Exits aktiv, Hard-Stop bei {hard_stop_floor:.2f}")
 
             # High-Water-Mark: Peak tracken und Gewinn sichern
             # NEUE LOGIK (nach Blutbad 18.04.): close-all realisierte -8.5% Tages-P&L

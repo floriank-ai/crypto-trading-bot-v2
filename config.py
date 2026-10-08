@@ -32,7 +32,16 @@ class Config:
     # erst Longs ab +1% (1010) handeln → im Bull-Markt gelähmt. 0 = binär:
     # am/über dem Boden voll traden (Longs+Shorts), erst UNTER dem Boden nur Shorts.
     # Das tote Band ist redundant — der Boden trailt eh 8% unter Peak, HWM ab 3%.
-    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", 0.0))
+    # 08.10.2026 — Default 0.0 → -0.25. Live beim Verifizieren des Resets gesehen:
+    # Portfolio 999.09 vs. Boden 1000.00 → cap_pnl -0.09% → sofort "nur Shorts",
+    # und zwar AUSSCHLIESSLICH wegen der Einstiegsgebühr des ersten Trades (0.91 EUR).
+    # Bei 0.0 kippt also jede normale Gebührenfriktion den Bot dauerhaft in
+    # Shorts-only — genau die Schieflage, die das short-schwere Buch erzeugt hat,
+    # das am 13.07.2026 deadlockte. -0.25% ist ein Toleranzband knapp unter dem
+    # Boden: ein einzelner Round-Trip (~0.52% auf die Position, bei 200-400 EUR
+    # Positionen ~0.1-0.2% des Portfolios) löst den Schutz nicht mehr aus, ein
+    # echter Drawdown schon.
+    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", -0.25))
     # 15.06.2026 — Zwei-Stufen-Schutz statt Hard-Freeze-Deadlock.
     # PROBLEM: Unter dem Boden machte der Bot sleep+continue → check_exits wurde
     # übersprungen → offene Positionen wurden NICHT mehr gemanagt (keine SL/TP)
