@@ -1,0 +1,500 @@
+  ----------------------------------------------------------------------
+  APE/EUR            0.14    +2.0%       52,819    7.0  good volume, moving +2.0%, RSI overbought (74)
+  AVAX/EUR           8.27    +3.0%      360,078    5.0  high volume, moving +3.0%
+  ARB/EUR            0.11    +4.0%       63,575    7.0  good volume, moving +4.0%, RSI overbought (79)
+  DOT/EUR            1.13    +3.2%      379,677    5.0  high volume, moving +3.2%
+  ARKM/EUR           0.11    +7.7%      107,807    7.0  high volume, big move +7.7%
+  BILL/EUR           0.05   +48.5%      129,209    7.0  high volume, big move +48.5%
+  [Gainer] Kandidaten (2/2): BILL/EUR +48%, TON/EUR +17%
+  DASH/EUR          46.92   +11.6%      865,254    7.0  high volume, big move +11.6%
+
+  DOGS/EUR           0.00   -13.5%      117,642    7.0  high volume, big move -13.5%
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +17%: Volume fading — momentum dying
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +48%: Gain +48% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing BONK/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing AVAX/EUR...
+  Analyzing DOT/EUR...
+
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Open positions (2):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.560 P&L=+3.34EUR [grid] SL=80.245 TP=82.628
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 6 | 12:53:52
+============================================================
+  Cash: 745.36EUR | Portfolio: 1003.64EUR | Tages-P&L: -0.00% [AGGRESSIVE]
+  Markt: BTC +0.17% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  BONK/EUR           0.00    +5.6%       56,379   12.0  good volume, big move +5.6%, massive volume spike!
+  DOGS/EUR           0.00   -13.5%      117,599   10.0  high volume, big move -13.5%, RSI low (39)
+  APE/EUR            0.14    +2.0%       52,819    7.0  good volume, moving +2.0%, RSI overbought (74)
+  ARB/EUR            0.11    +3.7%       63,642    7.0  good volume, moving +3.7%, RSI overbought (71)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +49.1%      129,236    7.0  high volume, big move +49.1%
+  DASH/EUR          46.92   +11.6%      865,254    7.0  high volume, big move +11.6%
+  CC/EUR             0.13    -0.0%      146,949    6.0  high volume, RSI low (40)
+  AAVE/EUR          81.56    +2.1%      175,786    5.0  high volume, moving +2.1%
+  ADA/EUR            0.23    +2.8%    2,129,604    5.0  high volume, moving +2.8%
+  ALGO/EUR           0.10    +2.1%      449,686    5.0  high volume, moving +2.1%
+  AVAX/EUR           8.27    +3.0%      361,776    5.0  high volume, moving +3.0%
+  [MegaGainer] Error: kucoin GET https://api.kucoin.com/api/v1/market/allTickers
+  [Gainer] Kandidaten (2/2): BILL/EUR +49%, TON/EUR +17%
+
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +17%: Volume fading — momentum dying
+
+  Analyzing BONK/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +49%: Gain +49% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing AVAX/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Open positions (2):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+  Next scan in 15s...
+    AAVE/EUR [LONG]: entry=79.450 now=81.560 P&L=+3.34EUR [grid] SL=80.245 TP=82.628
+
+
+============================================================
+  Cycle 7 | 12:55:11
+============================================================
+  Cash: 745.36EUR | Portfolio: 1003.64EUR | Tages-P&L: -0.00% [AGGRESSIVE]
+  Markt: BTC +0.21% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  BONK/EUR           0.00    +5.6%       56,379   12.0  good volume, big move +5.6%, massive volume spike!
+  DOGS/EUR           0.00   -13.9%      117,603   10.0  high volume, big move -13.9%, RSI low (39)
+  AI/EUR             0.03    -2.7%      168,892    9.0  high volume, moving -2.7%, volume spike!
+  CC/EUR             0.13    -0.0%      146,949    8.0  high volume, RSI low (37), volume rising
+  APE/EUR            0.14    +2.0%       52,819    7.0  good volume, moving +2.0%, RSI overbought (74)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +50.6%      129,273    7.0  high volume, big move +50.6%
+  DASH/EUR          47.00   +11.7%      865,729    7.0  high volume, big move +11.7%
+  AAVE/EUR          81.56    +2.1%      175,786    5.0  high volume, moving +2.1%
+  ADA/EUR            0.23    +2.8%    2,129,345    5.0  high volume, moving +2.8%
+  ALGO/EUR           0.10    +2.1%      449,686    5.0  high volume, moving +2.1%
+  [Gainer] Kandidaten (2/2): BILL/EUR +51%, TON/EUR +17%
+
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +17%: Volume fading — momentum dying
+
+  Analyzing BONK/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing AI/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +51%: Gain +51% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Open positions (2):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.560 P&L=+3.34EUR [grid] SL=80.245 TP=82.628
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 8 | 12:56:21
+============================================================
+  Cash: 745.36EUR | Portfolio: 1003.64EUR | Tages-P&L: -0.00% [AGGRESSIVE]
+  Markt: BTC +0.21% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+  DOGS/EUR           0.00   -13.9%      117,603   10.0  high volume, big move -13.9%, RSI low (39)
+  AI/EUR             0.03    -2.7%      167,277    9.0  high volume, moving -2.7%, volume spike!
+  CC/EUR             0.13    -0.2%      147,697    8.0  high volume, RSI low (37), volume rising
+  CFG/EUR            0.21    +1.5%       99,547    8.0  good volume, massive volume spike!
+  APE/EUR            0.14    +2.0%       52,819    7.0  good volume, moving +2.0%, RSI overbought (74)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +50.6%      129,172    7.0  high volume, big move +50.6%
+  DASH/EUR          47.00   +11.7%      865,729    7.0  high volume, big move +11.7%
+  AAVE/EUR          81.56    +2.1%      175,769    5.0  high volume, moving +2.1%
+  ADA/EUR            0.23    +2.8%    2,128,020    5.0  high volume, moving +2.8%
+  [Gainer] Kandidaten (2/2): BILL/EUR +51%, TON/EUR +17%
+
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  BONK/EUR           0.00    +5.6%       56,379   12.0  good volume, big move +5.6%, massive volume spike!
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +17%: Volume fading — momentum dying
+
+  Analyzing BONK/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing AI/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing CFG/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +51%: Gain +51% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Open positions (2):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.560 P&L=+3.34EUR [grid] SL=80.245 TP=82.628
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 9 | 12:57:30
+============================================================
+  Cash: 745.36EUR | Portfolio: 1003.64EUR | Tages-P&L: -0.00% [AGGRESSIVE]
+  Markt: BTC +0.21% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  BONK/EUR           0.00    +5.6%       56,379   12.0  good volume, big move +5.6%, massive volume spike!
+  DOGS/EUR           0.00   -13.9%      117,600   10.0  high volume, big move -13.9%, RSI low (39)
+  AI/EUR             0.03    -2.7%      157,538    9.0  high volume, moving -2.7%, volume spike!
+  CFG/EUR            0.21    +1.5%      100,691    9.0  high volume, massive volume spike!
+  CC/EUR             0.13    -0.2%      147,697    8.0  high volume, RSI low (37), volume rising
+  APE/EUR            0.14    +2.0%       52,819    7.0  good volume, moving +2.0%, RSI overbought (74)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +50.6%      129,172    7.0  high volume, big move +50.6%
+  DASH/EUR          47.13   +12.1%      867,404    7.0  high volume, big move +12.1%
+  AAVE/EUR          81.56    +2.1%      175,769    5.0  high volume, moving +2.1%
+  ADA/EUR            0.23    +2.8%    2,128,511    5.0  high volume, moving +2.8%
+  [Gainer] Kandidaten (2/2): BILL/EUR +51%, TON/EUR +18%
+
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +18%: Volume fading — momentum dying
+
+  Analyzing BONK/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing AI/EUR...
+    [grid] BUY: Grid buy at 0.03 + dropped 0.00 + RSI 40 + EMA-Trend ok
+    >> Executing grid LONG signal
+    Sizing: NORMAL ~101EUR (cash 745EUR)
+  >> BUY 3726.81340206 AI/EUR @ 0.03EUR [grid] (fee: 0.2628EUR)
+
+  Analyzing CFG/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +51%: Gain +51% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Total trades: 1 | Realisiert: +0.00EUR | Fees: 0.2628EUR | Tages-P&L: -0.00%
+
+  Open positions (3):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.560 P&L=+3.34EUR [grid] SL=80.245 TP=82.628
+    AI/EUR [LONG]: entry=0.0271 now=0.0270 P&L=-0.37EUR [grid] SL=0.0260 TP=0.0282
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 10 | 12:58:44
+============================================================
+  Cash: 644.03EUR | Portfolio: 1003.01EUR | Tages-P&L: -0.07% [AGGRESSIVE]
+  Markt: BTC +0.23% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  AI/EUR             0.03    -3.1%      157,664   12.0  high volume, moving -3.1%, RSI low (39)
+  BONK/EUR           0.00    +5.6%       56,379   12.0  good volume, big move +5.6%, massive volume spike!
+  DOGS/EUR           0.00   -13.9%      117,588   10.0  high volume, big move -13.9%, RSI low (39)
+  CFG/EUR            0.21    +1.8%      100,718    9.0  high volume, massive volume spike!
+  CC/EUR             0.13    -0.2%      147,697    8.0  high volume, RSI low (37), volume rising
+  APE/EUR            0.14    +2.2%       52,819    7.0  good volume, moving +2.2%, RSI overbought (75)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +50.5%      129,063    7.0  high volume, big move +50.5%
+  DASH/EUR          47.13   +12.1%      867,404    7.0  high volume, big move +12.1%
+  ADA/EUR            0.23    +2.8%    2,128,511    5.0  high volume, moving +2.8%
+  ALGO/EUR           0.10    +2.1%      448,528    5.0  high volume, moving +2.1%
+  [Gainer] Kandidaten (2/2): BILL/EUR +52%, TON/EUR +18%
+
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +18%: Volume fading — momentum dying
+
+  Analyzing BONK/EUR...
+
+  Analyzing DOGS/EUR...
+
+  Analyzing CFG/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+  Analyzing ARKM/EUR...
+
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +50%: Gain +50% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing BTC/EUR...
+
+  Total trades: 1 | Realisiert: +0.00EUR | Fees: 0.2628EUR | Tages-P&L: -0.07%
+
+  Open positions (3):
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.490 P&L=+3.23EUR [grid] SL=80.245 TP=82.628
+    AI/EUR [LONG]: entry=0.0271 now=0.0270 P&L=-0.37EUR [grid] SL=0.0260 TP=0.0282
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 11 | 12:59:59
+============================================================
+  Cash: 644.03EUR | Portfolio: 1002.90EUR | Tages-P&L: -0.08% [AGGRESSIVE]
+  Markt: BTC +0.27% → NEUTRAL
+  [Regime-Ext] NEUTRAL + BTC 15m -0.00% → unter Schwelle (-0.5%), Shorts geblockt
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+  AVAX/EUR           8.27    +3.0%      361,372    5.0  high volume, moving +3.0%
+  [Gainer] Kandidaten (2/2): BILL/EUR +49%, TON/EUR +18%
+
+  Analyzing TON/EUR...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  DOGS/EUR           0.00   -13.9%      117,588   10.0  high volume, big move -13.9%, RSI low (40)
+  AI/EUR             0.03    -3.1%      157,664    8.0  high volume, moving -3.1%, RSI low (40)
+  APE/EUR            0.14    +2.2%       52,819    7.0  good volume, moving +2.2%, RSI overbought (75)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +46.6%      128,740    7.0  high volume, big move +46.6%
+  DASH/EUR          47.13   +12.1%      867,404    7.0  high volume, big move +12.1%
+  BONK/EUR           0.00    +5.6%       56,373    6.0  good volume, big move +5.6%
+  CC/EUR             0.13    -0.2%      147,697    6.0  high volume, RSI low (37)
+  ADA/EUR            0.23    +2.8%    2,128,489    5.0  high volume, moving +2.8%
+  ALGO/EUR           0.10    +2.1%      448,335    5.0  high volume, moving +2.1%
+    [gainer] SKIP TON/EUR +18%: Volume fading — momentum dying
+
+  Analyzing DOGS/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +47%: Gain +47% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing BONK/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing AVAX/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Total trades: 1 | Realisiert: +0.00EUR | Fees: 0.2628EUR | Tages-P&L: -0.08%
+
+  Open positions (3):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.490 P&L=+3.23EUR [grid] SL=80.245 TP=82.628
+    AI/EUR [LONG]: entry=0.0271 now=0.0270 P&L=-0.37EUR [grid] SL=0.0260 TP=0.0282
+
+  Next scan in 15s...
+
+============================================================
+  Cycle 12 | 13:01:14
+============================================================
+  Cash: 644.03EUR | Portfolio: 1002.90EUR | Tages-P&L: -0.08% [AGGRESSIVE]
+  Markt: BTC +0.27% → NEUTRAL
+  [Regime-Ext] NEUTRAL + BTC 15m -0.00% → unter Schwelle (-0.5%), Shorts geblockt
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn
+
+  Scanning top coins on Kraken...
+
+  Symbol            Price     24h%       Volume  Score  Reasons
+  ----------------------------------------------------------------------
+  DOGS/EUR           0.00   -13.9%      117,043   10.0  high volume, big move -13.9%, RSI low (40)
+  AI/EUR             0.03    -3.1%      157,664    8.0  high volume, moving -3.1%, RSI low (40)
+  APE/EUR            0.14    +2.2%       51,120    7.0  good volume, moving +2.2%, RSI overbought (75)
+  ARB/EUR            0.11    +3.9%       64,642    7.0  good volume, moving +3.9%, RSI overbought (76)
+  ARKM/EUR           0.11    +8.1%      107,815    7.0  high volume, big move +8.1%
+  BILL/EUR           0.05   +48.9%      129,039    7.0  high volume, big move +48.9%
+  DASH/EUR          47.13   +12.1%      867,385    7.0  high volume, big move +12.1%
+  BONK/EUR           0.00    +5.6%       56,373    6.0  good volume, big move +5.6%
+  CC/EUR             0.13    -0.2%      147,697    6.0  high volume, RSI low (37)
+  ADA/EUR            0.23    +2.7%    2,128,508    5.0  high volume, moving +2.7%
+  ALGO/EUR           0.10    +2.4%      448,516    5.0  high volume, moving +2.4%
+  AVAX/EUR           8.27    +3.0%      361,372    5.0  high volume, moving +3.0%
+  [Gainer] Kandidaten (2/2): BILL/EUR +49%, TON/EUR +19%
+
+  Analyzing TON/EUR...
+    [gainer] SKIP TON/EUR +19%: Volume fading — momentum dying
+
+  Analyzing DOGS/EUR...
+
+  Analyzing APE/EUR...
+
+  Analyzing ARB/EUR...
+
+  Analyzing ARKM/EUR...
+
+  Analyzing BILL/EUR...
+    [gainer] SKIP BILL/EUR +49%: Gain +49% zu hoch (>=40%) — Pump gelaufen
+
+  Analyzing DASH/EUR...
+
+  Analyzing BONK/EUR...
+
+  Analyzing CC/EUR...
+
+  Analyzing ADA/EUR...
+
+  Analyzing ALGO/EUR...
+
+  Analyzing AVAX/EUR...
+
+  Analyzing BTC/EUR...
+    [sentiment] BUY: News: Colombian president's endorsement of Bitcoin mining is a strong positive for (score: +7)
+    [sentiment] BTC/EUR LONG: keine TA-Bestaetigung (momentum/grid in selber Richtung) — verworfen
+
+  Total trades: 1 | Realisiert: +0.00EUR | Fees: 0.2628EUR | Tages-P&L: -0.08%
+
+  Open positions (3):
+    COMP/EUR [LONG]: entry=19.980 now=20.600 P&L=+3.89EUR [grid] SL=20.180 TP=20.779
+    AAVE/EUR [LONG]: entry=79.450 now=81.600 P&L=+3.40EUR [grid] SL=80.245 TP=82.628
+    AI/EUR [LONG]: entry=0.0271 now=0.0271 P&L=-0.22EUR [grid] SL=0.0260 TP=0.0282
+
+  Next scan in 15s...
+
+============================================================
+============================================================
+  Cash: 644.03EUR | Portfolio: 1003.22EUR | Tages-P&L: -0.01% [AGGRESSIVE]
+  Markt: BTC +0.35% → NEUTRAL
+  [Gainer Slot] Frei (2 offen) — suche Coin mit >15% 24h Gewinn

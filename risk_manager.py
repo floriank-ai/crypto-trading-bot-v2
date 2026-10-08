@@ -18,6 +18,15 @@ class RiskManager:
         # Kapitalwachstum (peak*(1-BAND)), fällt nie unter INITIAL_CAPITAL.
         # Wird in main.py nach jedem Peak-Update hochgeratscht.
         self.capital_floor = Config.INITIAL_CAPITAL
+        # 08.10.2026: Untere Schranke der Boden-Ratsche. Früher war das die
+        # Konstante Config.INITIAL_CAPITAL direkt in der max()-Ratsche in main.py.
+        # Das machte den Boden absolut unverrückbar nach unten — und damit den
+        # Hard-Stop zu einem Dauergrab: unter 950 konnte der Bot nicht handeln,
+        # also nie wieder über 950 kommen (13.07.-29.09.2026, -138.80 EUR).
+        # Jetzt darf der Circuit-Breaker diese Schranke EINMAL mit nach unten
+        # nehmen, damit es einen Rückweg gibt. Nach unten begrenzt durch
+        # CAPITAL_FLOOR_REBASE_MIN_FRAC, damit sie nicht beliebig durchrutscht.
+        self.capital_floor_min = Config.INITIAL_CAPITAL
 
     # ── Tages-Ziel ──────────────────────────────────────────────────────────
 

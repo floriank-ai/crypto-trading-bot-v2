@@ -41,6 +41,14 @@ class Config:
     # weiter → Bot kann sich rausarbeiten. Hard-Freeze ERST bei echtem Absturz
     # CAPITAL_HARD_STOP_PCT % unter dem Boden (Katastrophenschutz).
     CAPITAL_HARD_STOP_PCT = float(os.getenv("CAPITAL_HARD_STOP_PCT", 5.0))
+    # 08.10.2026: Der Hard-Stop ist jetzt ein Circuit-Breaker statt eines Vollstopps
+    # (siehe main.py). Nach dem Flat-Gehen pausieren neue Entries so lange — danach
+    # handelt der Bot normal weiter. Verhindert das 78-Tage-Dauergrab vom 13.07.2026.
+    HARD_STOP_COOLDOWN_HOURS = float(os.getenv("HARD_STOP_COOLDOWN_HOURS", 2.0))
+    # Beim Re-Basieren darf der Boden nie unter diesen Anteil des Startkapitals
+    # fallen — sonst könnte sich der Boden bei einer Verlustserie beliebig tief
+    # nach unten durchreichen. 0.5 = Boden mindestens 500 EUR bei 1000 Start.
+    CAPITAL_FLOOR_REBASE_MIN_FRAC = float(os.getenv("CAPITAL_FLOOR_REBASE_MIN_FRAC", 0.5))
 
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))
@@ -57,7 +65,14 @@ class Config:
     # Realized-Loss). Jeder Re-Entry kostet ~0.52% Round-Trip. 2/Tag/Symbol = weniger
     # Whipsaw-Re-Entries, der Gewinner muss die Gebuehr wirklich ueberspringen.
     MAX_TRADES_PER_SYMBOL_PER_DAY = int(os.getenv("MAX_TRADES_PER_SYMBOL_PER_DAY", 2))
-    ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 2))
+    # 08.10.2026: 2→3. Bei 2 war das Gate wirkungslos (Momentum liefert immer
+    # lev>=2 → jedes Signal galt als "strong" und durfte rotieren). 3 = nur
+    # echte Breakout-Konviktion darf eine bestehende Position verdrängen.
+    ROTATION_MIN_LEVERAGE = int(os.getenv("ROTATION_MIN_LEVERAGE", 3))
+    # Rotation nur, wenn die schwächste Position mindestens so tief im Minus ist.
+    # Forensik: Rotation hatte EV -0.85/Trade — sie schnitt oft flache oder sogar
+    # grüne Positionen weg und zahlte dafür den Round-Trip.
+    ROTATION_MIN_LOSS_PCT = float(os.getenv("ROTATION_MIN_LOSS_PCT", -1.5))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
     # Strategies
@@ -90,6 +105,13 @@ class Config:
     # nicht mehr. Genau die selektive Logik, die das Gate ursprünglich wollte.
     # Lehre 28.04. bleibt: Bypass NUR in NEUTRAL, nie gegen BULLISH/BEARISH-Trend.
     HIGH_CONVICTION_MOMENTUM_LEVERAGE = int(os.getenv("HIGH_CONVICTION_MOMENTUM_LEVERAGE", 3))
+    # 08.10.2026: Der NEUTRAL-Bypass gilt nur noch für SHORTS. Begründung mit
+    # Zahlen im Kommentar an der Bypass-Stelle in main.py: der Long-Breakout hat
+    # über 310 Trades einen negativen BRUTTO-Edge (-0.427/Trade), der
+    # Short-Breakdown über 663 Trades einen klar positiven (+0.753/Trade).
+    # Longs nur noch in echtem BULLISH-Regime, nicht mehr im NEUTRAL-Chop.
+    # Auf 1 setzen, falls Longs im Seitwärtsmarkt wieder erlaubt sein sollen.
+    ALLOW_NEUTRAL_LONG_BYPASS = os.getenv("ALLOW_NEUTRAL_LONG_BYPASS", "0") == "1"
 
     # Sentiment-Whitelist: nur diese Symbole duerfen ueber Sentiment getradet werden.
     # Lehre 25.-27.04.2026: Sentiment hat in 76k Logzeilen NULL profitable Trades
@@ -131,7 +153,12 @@ class Config:
     # Time-Stop: Position die >X Stunden offen ist UND P&L flatlined zwischen
     # ±Y% → Soft-Close. 27.04.2026: 4 SHORTs hingen 8h+ ohne Bewegung, blockierten
     # Slots fuer 37 weitere Setups.
-    POSITION_TIME_STOP_HOURS = float(os.getenv("POSITION_TIME_STOP_HOURS", 4.0))
+    # 08.10.2026: 4.0→12.0h. Forensik: time_stop_flatlined war brutto +25.96 EUR,
+    # aber 112.05 EUR Fees → netto -86.09 (330 Trades, EV -0.26). Die Positionen
+    # waren VOR Gebühren leicht profitabel — der 4h-Schnitt hat sie zu früh
+    # kassiert, die Gebühr machte daraus ein Minus. Mehr Zeit + das engere
+    # ±0.5%-Band (unten) = nur noch wirklich tote Positionen werden geflusht.
+    POSITION_TIME_STOP_HOURS = float(os.getenv("POSITION_TIME_STOP_HOURS", 12.0))
     # 24.06.2026: 1.0→0.5. Fee-Drag-Fix: ein Time-Stop bei +0.7% Brutto ist nach
     # 0.52% Round-Trip-Fee netto NEGATIV. Engeres Band = nur wirklich tote Positionen
     # (±0.5%) werden geflusht; eine die noch +0.7% laeuft darf Richtung TP weiter,
@@ -154,6 +181,14 @@ class Config:
     # 15m-Wackler waren keine Trends. Schwelle auf -0.5% angehoben (echtes
     # Intraday-Rutschen, nicht Noise).
     NEUTRAL_SHORT_BTC_15M_THRESHOLD = float(os.getenv("NEUTRAL_SHORT_BTC_15M_THRESHOLD", -0.005))
+
+    # Marktkontext-Exit Gain-Locks (08.10.2026, aus der Forensik abgeleitet).
+    # SHORT-Seite: war bei 1.5% der zweitschlimmste Posten (EV -0.81, -131.10 EUR)
+    # weil er die einzig profitable Richtung deckelte → auf 4% angehoben, damit
+    # Gewinner Richtung TP (EV +3.94) laufen dürfen.
+    # LONG-Seite: bei 1.5% leicht positiv (EV +0.13) → bleibt.
+    MARKET_EXIT_SHORT_GAIN_LOCK = float(os.getenv("MARKET_EXIT_SHORT_GAIN_LOCK", 0.04))
+    MARKET_EXIT_LONG_GAIN_LOCK = float(os.getenv("MARKET_EXIT_LONG_GAIN_LOCK", 0.015))
 
 
     # Symbol-Blacklist: nie handeln. Stablecoins liefern strukturell ~0% PnL und

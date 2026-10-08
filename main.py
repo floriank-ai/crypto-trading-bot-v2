@@ -530,6 +530,9 @@ def run_bot():
     print(f"  [CleanStart] peak_portfolio={peak_portfolio:.2f}EUR | "
           f"daily_start={risk_mgr.daily_start_value:.2f}EUR | hwm_pause=off")
     tageslimit_alerted_today = False  # verhindert Telegram-Spam bei dauerhaftem -5%
+    # 08.10.2026: Circuit-Breaker-Zustand fuer den Kapital-Hard-Stop. Siehe den
+    # ausfuehrlichen Kommentar an der Hard-Stop-Stelle in der Hauptschleife.
+    hard_stop_resume_at = 0.0
     # Kill-Switch: {strategy_name: unix_ts_until} — blutende Strategien pausieren
     paused_strategies = {}
     # Gainer-Alert Debounce: {symbol: unix_ts_alerted} — damit nicht jeder Cycle spammt
@@ -634,9 +637,15 @@ def run_bot():
             # und nie unter INITIAL_CAPITAL. Das ist der einzige Anker für den echten
             # Kapital-Schutz — entkoppelt vom hochratschenden daily_start_value, der
             # den Bot früher einfror, obwohl netto im Plus.
+            # 08.10.2026: hier stand Config.INITIAL_CAPITAL als harte Untergrenze.
+            # Zusammen mit dem neuen Circuit-Breaker hätte das eine Endlosschleife
+            # ergeben: der Breaker basiert den Boden auf z.B. 940, die Ratsche hebt
+            # ihn im nächsten Zyklus per max(..., 1000, ...) sofort zurück auf 1000,
+            # der Hard-Stop steht wieder bei 950 → Close-All alle 2h für immer.
+            # Darum jetzt die re-basierbare Schranke risk_mgr.capital_floor_min.
             risk_mgr.capital_floor = max(
                 risk_mgr.capital_floor,
-                Config.INITIAL_CAPITAL,
+                risk_mgr.capital_floor_min,
                 peak_portfolio * (1 - Config.CAPITAL_TRAIL_BAND),
             )
             cap_pnl = risk_mgr.get_capital_pnl_pct(exchange)
@@ -668,14 +677,54 @@ def run_bot():
             #   übersprang sogar check_exits → offene Positionen unverwaltet → Deadlock.
             # Stufe 2 — HARD (portfolio < hard_stop_floor): echter Absturz CAPITAL_HARD_STOP_PCT%
             #   unter dem Boden → Vollstopp (Katastrophenschutz), bis Erholung über den Hard-Stop.
+            # 08.10.2026 (CRITICAL FIX — teuerster Bug der Forensik):
+            # Früher stand hier "time.sleep(...) + continue" = Vollstopp. Das
+            # übersprang ALLES darunter, insbesondere check_exits.
+            # Forensik der Volume-Daten 27.04.-29.09.2026 (156 Tage):
+            #   13.07. fiel das Portfolio auf 946.89 EUR, knapp unter den Hard-Stop
+            #   (950 = Boden 1000 - 5%). Der Bot fror ein und managte seine beiden
+            #   offenen SHORTs (ETH, ADA) nicht mehr — 78 Tage, 0 Trades,
+            #   -138.80 EUR Drift = 59% des Gesamtverlusts von -233.56 EUR.
+            # Der Konstruktionsfehler: unter dem Hard-Stop darf der Bot nicht
+            # handeln, kann also nie wieder darüber kommen → Dauergrab ohne Rückweg.
+            # Neu: echter Circuit-Breaker.
+            #   1) EINMAL flat gehen — das ist der eigentliche Kapitalschutz,
+            #      nicht das Zusehen beim Ausbluten.
+            #   2) Boden auf den Istwert neu basieren → es gibt einen Rückweg.
+            #   3) Kurze Pause, dann handelt er normal weiter.
+            # Eiserne Regel ab jetzt: KEIN "continue" vor check_exits. Exits
+            # laufen in JEDEM Zustand, sonst sind offene Positionen unverwaltet.
             hard_stop_floor = risk_mgr.capital_floor * (1 - Config.CAPITAL_HARD_STOP_PCT / 100)
+            block_new_entries = False
             if portfolio_val < hard_stop_floor:
-                print(f"  🛑 KAPITAL-HARD-STOP: Portfolio {portfolio_val:.2f} < Hard-Stop {hard_stop_floor:.2f}EUR ({cap_pnl:.2f}%) — Vollstopp bis Erholung")
-                if not tageslimit_alerted_today:
-                    notifier.send(f"🛑 *KAPITAL-HARD-STOP*\nPortfolio `{portfolio_val:.2f}EUR` unter Hard-Stop `{hard_stop_floor:.2f}EUR` ({cap_pnl:.2f}%)\nVollstopp bis Erholung (Boden {risk_mgr.capital_floor:.2f})")
-                    tageslimit_alerted_today = True
-                time.sleep(Config.CHECK_INTERVAL)
-                continue
+                block_new_entries = True
+                if time.time() >= hard_stop_resume_at:
+                    print(f"  🛑 KAPITAL-HARD-STOP: Portfolio {portfolio_val:.2f} < Hard-Stop {hard_stop_floor:.2f}EUR ({cap_pnl:.2f}%)")
+                    print(f"     → Circuit-Breaker: alle Positionen schließen, Boden neu basieren, "
+                          f"{Config.HARD_STOP_COOLDOWN_HOURS:.1f}h Entry-Pause (Exits bleiben aktiv)")
+                    closed = do_closeall()
+                    n_closed = len(closed) if closed else 0
+                    new_floor = max(risk_mgr.get_portfolio_value(exchange),
+                                    Config.INITIAL_CAPITAL * Config.CAPITAL_FLOOR_REBASE_MIN_FRAC)
+                    old_floor = risk_mgr.capital_floor
+                    risk_mgr.capital_floor = new_floor
+                    # Die Ratschen-Schranke MUSS mit nach unten, sonst zieht die
+                    # max()-Ratsche oben den Boden sofort wieder hoch und der
+                    # Breaker feuert in Dauerschleife.
+                    risk_mgr.capital_floor_min = new_floor
+                    hard_stop_resume_at = time.time() + Config.HARD_STOP_COOLDOWN_HOURS * 3600
+                    print(f"     Circuit-Breaker fertig: {n_closed} Position(en) geschlossen, "
+                          f"Boden {old_floor:.2f} → {new_floor:.2f}EUR")
+                    notifier.send(
+                        f"🛑 *KAPITAL-HARD-STOP (Circuit-Breaker)*\n"
+                        f"Portfolio `{portfolio_val:.2f}EUR` unter Hard-Stop `{hard_stop_floor:.2f}EUR` ({cap_pnl:.2f}%)\n"
+                        f"→ {n_closed} Position(en) geschlossen (flat)\n"
+                        f"→ Boden neu basiert: `{old_floor:.2f}` → `{new_floor:.2f}EUR`\n"
+                        f"→ {Config.HARD_STOP_COOLDOWN_HOURS:.1f}h keine neuen Entries, Exits laufen weiter")
+                else:
+                    mins_left = (hard_stop_resume_at - time.time()) / 60
+                    print(f"  🛑 HARD-STOP-Pause: noch {mins_left:.0f}min ohne neue Entries "
+                          f"(Exits laufen, Portfolio {portfolio_val:.2f}EUR)")
             if portfolio_val < risk_mgr.capital_floor:
                 # Soft-Zone: nur informativ — VERLUSTBREMSE (cap_pnl<PROTECT_PCT) blockt
                 # unten die neuen Longs, Shorts + Exit-Management laufen normal weiter.
@@ -750,15 +799,23 @@ def run_bot():
                     risk_mgr.daily_start_value = peak_portfolio
                 tageslimit_alerted_today = False  # neuer Trigger moeglich
                 print(f"  Pause fuer neue Trades bis {datetime.fromtimestamp(hwm_pause_until).strftime('%H:%M:%S')} | neuer Tages-Boden {risk_mgr.daily_start_value:.2f}EUR")
-                time.sleep(Config.CHECK_INTERVAL)
-                continue
+                # 08.10.2026: kein "continue" mehr — die eben break-even-gelockten
+                # Winner sollen sofort vom Exit-Management gesehen werden, statt erst
+                # einen Zyklus später. Entries sind über das Flag gesperrt.
+                block_new_entries = True
 
             # HWM Pause aktiv
+            # 08.10.2026 (FIX, gleiche Fehlerklasse wie der Hard-Stop): hier stand
+            # "time.sleep + continue". Der Kommentar sagt "keine neuen Trades" — die
+            # Absicht war also nur, ENTRIES zu pausieren. Tatsächlich übersprang das
+            # continue aber die ganze Schleife inkl. check_exits, d.h. 30 Minuten
+            # (hwm_pause_until = +1800s) lang wurden offene Positionen nach JEDEM
+            # HWM-Event nicht mehr gemanagt — kein SL, kein TP, kein Trailing.
+            # Jetzt: Entries sperren, Exits laufen weiter.
             if time.time() < hwm_pause_until:
                 remaining = int((hwm_pause_until - time.time()) / 60)
-                print(f"  🔒 HWM-Pause: noch {remaining}min — keine neuen Trades")
-                time.sleep(Config.CHECK_INTERVAL)
-                continue
+                print(f"  🔒 HWM-Pause: noch {remaining}min — keine neuen Entries (Exits aktiv)")
+                block_new_entries = True
 
             # Kill-Switch: Strategie-Performance der letzten 6h prüfen.
             # Wenn eine Strategie -2% (in EUR: 2% vom Portfolio) netto verloren hat,
@@ -848,7 +905,16 @@ def run_bot():
                     cur = ticker["last"]
                     pnl_pct = (pos["entry_price"] - cur) / pos["entry_price"]
                     reason = None
-                    if pnl_pct > 0.015:
+                    # 08.10.2026: Schwelle 1.5% → MARKET_EXIT_SHORT_GAIN_LOCK (4%).
+                    # Forensik 1402 Round-Trips: dieser Zweig (market_context_exit_bull)
+                    # war mit 162 Trades / -131.10 EUR / EV -0.81 der zweitschlimmste
+                    # Posten im Bot. Er deckelte Gewinne bei +1.5% auf der SHORT-Seite
+                    # — und die Shorts sind die einzige profitable Richtung
+                    # (+468.91 EUR brutto, +0.690/Trade vs. Longs -0.236/Trade).
+                    # Dagegen: take_profit hat EV +3.94 (61 Trades, +240.42 EUR).
+                    # Lehre: Gewinner laufen lassen bis TP/Trailing greift, nicht bei
+                    # +1.5% abschneiden — nach 0.52% Round-Trip bleibt davon kaum was.
+                    if pnl_pct > Config.MARKET_EXIT_SHORT_GAIN_LOCK:
                         reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
                     if reason:
                         print(f"  [MarktExit] BTC bullisch + {sym} SHORT → {reason}")
@@ -887,7 +953,12 @@ def run_bot():
                     cur = ticker["last"]
                     pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
                     reason = None
-                    if pnl_pct > 0.015:
+                    # Bewusst NICHT angehoben: dieser Zweig (market_context_exit_bear,
+                    # schließt LONGs bei BTC-Drehung) war in der Forensik leicht positiv
+                    # (132 Trades, +16.51 EUR, EV +0.13). Auf der Long-Seite ist früher
+                    # Gewinn mitnehmen offenbar richtig — dort ist der Brutto-Edge
+                    # negativ (-0.236/Trade), da darf man nicht auf mehr hoffen.
+                    if pnl_pct > Config.MARKET_EXIT_LONG_GAIN_LOCK:
                         reason = f"Gewinn +{pnl_pct*100:.1f}% sichern (Trend dreht)"
                     if reason:
                         print(f"  [MarktExit] BTC bearisch + {sym} LONG → {reason}")
@@ -1402,6 +1473,14 @@ def run_bot():
                         print(f"    Skip {symbol}: Churn-Cap erreicht ({sym_trades_today}/{Config.MAX_TRADES_PER_SYMBOL_PER_DAY} Trades heute)")
                         continue
 
+                    # 08.10.2026: Hard-Stop-Circuit-Breaker blockt NEUE Entries während
+                    # der Pause. Bewusst hier (vor regime_exempt), damit auch
+                    # gainer/dca/grid erfasst sind — die umgehen das Regime-Gate.
+                    # Exits laufen davon unberührt weiter (check_exits oben).
+                    if block_new_entries:
+                        print(f"    Skip {symbol}: HARD-STOP aktiv — keine neuen Entries")
+                        continue
+
                     regime_exempt = strat in ("gainer", "dca", "grid")
                     if not regime_exempt:
                         # High-Conviction-Bypass: in NEUTRAL werden normalerweise alle
@@ -1419,13 +1498,30 @@ def run_bot():
                         )
                         only_neutral = (regime_state == "NEUTRAL")
 
+                        # 08.10.2026: Bypass ist jetzt richtungs-abhängig.
+                        # Forensik (1402 Round-Trips, Mai-Sep 2026) der zwei
+                        # Spiegel-Setups von MomentumStrategy:
+                        #   Breakdown new low + vol (SHORT, lev3): 663 Trades,
+                        #     brutto +499.31, NETTO +286.38, +0.753/Trade, WR 58%
+                        #   Breakout new high + vol (LONG,  lev3): 310 Trades,
+                        #     brutto -132.22, NETTO -228.10, -0.427/Trade, WR 49%
+                        # Beide bekamen lev=3 und durften damit das NEUTRAL-Gate
+                        # umgehen. Der Short-Breakdown trägt den ganzen Bot, der
+                        # Long-Breakout hat auch brutto keinen Edge — Ausbrüche
+                        # scheitern im Chop, und genau dorthin ließ der Bypass sie
+                        # feuern. Longs brauchen ab jetzt ein ECHT bullisches Regime
+                        # (allow_long_entries), kein NEUTRAL-Bypass mehr.
+                        # Bewusst NICHT komplett abgeschaltet: in einem echten
+                        # Bullenmarkt muss der Bot long gehen können, sonst entsteht
+                        # wieder die Shorts-only-Todesspirale (13.07.2026).
                         if direction == "long" and not allow_long_entries:
-                            if high_conv and only_neutral:
+                            if high_conv and only_neutral and Config.ALLOW_NEUTRAL_LONG_BYPASS:
                                 print(f"    [HighConviction-Bypass] {symbol} LONG: "
                                       f"{strat} score={score_abs} lev={leverage} "
                                       f"durchgelassen trotz Regime {regime_state}")
                             else:
-                                print(f"    Skip {symbol}: LONG blockiert (Regime {regime_state})")
+                                print(f"    Skip {symbol}: LONG blockiert (Regime {regime_state}"
+                                      f"{', NEUTRAL-Long-Bypass aus' if high_conv and only_neutral else ''})")
                                 continue
                         if direction == "short" and not allow_short_entries:
                             if high_conv and only_neutral:
@@ -1444,23 +1540,77 @@ def run_bot():
                     low_cash = balance < 20  # only rotate if barely any cash left
                     if is_strong and (no_slots or low_cash):
                         weakest = risk_mgr.get_weakest_position(exchange)
+                        # 08.10.2026: Rotation war der Mechanismus mit der SCHLECHTESTEN
+                        # EV im ganzen Bot (Forensik 1402 Round-Trips: 96 Rotationen,
+                        # -81.74 EUR netto, EV -0.85/Trade). Grund: sie schloss die
+                        # "schwächste" Position auch dann, wenn die gar nicht schlecht
+                        # lief — und zahlte dafür 0.52% Round-Trip. Zusätzlich war das
+                        # is_strong-Gate wirkungslos (ROTATION_MIN_LEVERAGE=2, aber
+                        # Momentum liefert immer lev>=2, also galt JEDES Signal als
+                        # stark). Jetzt: nur rotieren, wenn die schwächste Position
+                        # wirklich im Minus ist (< ROTATION_MIN_LOSS_PCT).
+                        if weakest:
+                            wp = risk_mgr.open_positions.get(weakest, {})
+                            wt = exchange.get_ticker(weakest)
+                            if wp and wt and wt.get("last"):
+                                _cur = wt["last"]
+                                if wp.get("direction") == "short":
+                                    _wpnl = (wp["entry_price"] - _cur) / wp["entry_price"] * 100
+                                else:
+                                    _wpnl = (_cur - wp["entry_price"]) / wp["entry_price"] * 100
+                                if _wpnl > Config.ROTATION_MIN_LOSS_PCT:
+                                    print(f"    Rotation übersprungen: schwächste Position {weakest} "
+                                          f"liegt bei {_wpnl:+.2f}% (> {Config.ROTATION_MIN_LOSS_PCT:.1f}%) "
+                                          f"— kein echter Verlierer, Gebühr nicht gerechtfertigt")
+                                    weakest = None
                         if weakest and weakest != symbol:
                             print(f"    >> Rotation: closing {weakest} to free up capital for {symbol}")
                             weak_pos = risk_mgr.open_positions[weakest]
-                            rot_result = exchange.place_order(weakest, "sell", weak_pos["volume"])
+                            # 08.10.2026 (CRITICAL FIX): hier stand
+                            #   exchange.place_order(weakest, "sell", vol)
+                            # OHNE direction → Default "long". War die schwächste
+                            # Position ein SHORT, suchte _paper_order sie in
+                            # paper_positions (nur Longs), fand held=0 und gab
+                            # {"status": "error"} zurück. Dann wurde close_position()
+                            # nie aufgerufen → der Slot blieb für immer belegt.
+                            # Weil get_weakest_position() Shorts korrekt bewertet und
+                            # der Kapitalschutz in Shorts-only zwingt, war die
+                            # schwächste Position fast immer ein Short → Rotation
+                            # schlug dauerhaft still fehl und der Bot konnte keine
+                            # neuen Positionen mehr öffnen. Die beiden am 13.07.
+                            # hängenden Positionen waren genau das: zwei Shorts.
+                            # Jetzt wie in do_closeall(): Richtung korrekt mitgeben.
+                            rot_dir = weak_pos.get("direction", "long")
+                            rot_side = "buy" if rot_dir == "short" else "sell"
+                            rot_result = exchange.place_order(weakest, rot_side,
+                                                              weak_pos["volume"],
+                                                              direction=rot_dir)
                             if rot_result["status"] == "ok":
                                 rot_price = rot_result.get("price", 0)
-                                rot_pnl = (rot_price - weak_pos["entry_price"]) * weak_pos["volume"]
                                 rot_cost = rot_result.get("cost", weak_pos["volume"] * rot_price)
                                 rot_fee = rot_result.get("fee", rot_cost * 0.0026)
-                                logger.log_trade(pair=weakest, side="sell", volume=weak_pos["volume"],
+                                # Vorzeichen richtungsabhängig — vorher wurde für
+                                # Shorts das falsche Vorzeichen geloggt/gemeldet.
+                                if rot_dir == "short":
+                                    rot_pnl = (weak_pos["entry_price"] - rot_price) * weak_pos["volume"] - 2 * rot_fee
+                                    rot_log_side = "cover"
+                                else:
+                                    rot_pnl = (rot_price - weak_pos["entry_price"]) * weak_pos["volume"] - 2 * rot_fee
+                                    rot_log_side = "sell"
+                                logger.log_trade(pair=weakest, side=rot_log_side, volume=weak_pos["volume"],
                                                  price=rot_price, cost=rot_cost, fee=rot_fee,
                                                  mode=Config.TRADING_MODE, strategy=weak_pos["strategy"],
                                                  signal_reason="rotation",
-                                                 balance_after=exchange.get_balance())
+                                                 balance_after=exchange.get_balance(),
+                                                 realized_pnl=rot_pnl)
                                 risk_mgr.close_position(weakest)
                                 balance = exchange.get_balance()
                                 print(f"    Closed {weakest} P&L {rot_pnl:+.2f}EUR, cash now {balance:.2f}EUR")
+                            else:
+                                # Nicht mehr still scheitern — sonst sucht der Bot
+                                # endlos dieselbe Position zu rotieren.
+                                print(f"    [Rotation] FEHLER bei {weakest} ({rot_dir}): "
+                                      f"{rot_result.get('error', '?')} — Slot bleibt belegt")
 
                     print(f"    >> Executing {best['strategy']} {direction.upper()} signal")
                     if best["strategy"] == "gainer":
