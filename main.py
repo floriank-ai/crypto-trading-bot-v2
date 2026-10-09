@@ -401,7 +401,7 @@ def run_bot():
         lines = [f"📊 *Portfolio Status*\n",
                  f"💰 Cash: `{bal:.2f}EUR`",
                  f"📈 Portfolio: `{port:.2f}EUR`",
-                 f"🎯 Tages-P&L: `{pnl:+.2f}%`",
+                 f"🎯 Rücksetzer vom Hoch: `{pnl:+.2f}%`",
                  f"📂 Offene Positionen: {len(pos)}"]
         for sym, p in pos.items():
             ticker = exchange.get_ticker(sym)
@@ -684,7 +684,27 @@ def run_bot():
 
             daily_pnl = risk_mgr.get_daily_pnl_pct(exchange)
             phase = risk_mgr.get_trading_phase(exchange)
-            print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | Tages-P&L: {daily_pnl:+.2f}% | Kapital-P&L: {cap_pnl:+.2f}% (Boden {risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
+            # 09.10.2026: Statuszeile umbenannt, weil "Tages-P&L" schlicht falsch war.
+            # daily_pnl haengt an risk_mgr.daily_start_value, und der wird an FUENF
+            # Stellen gesetzt: Mitternacht, Neustart (auf den Istwert), HWM-Event (auf
+            # den PEAK), Reset und init. Folge: direkt nach einem Deploy stand da
+            # "+0.00%", und nach einem HWM-Event "-10.05%" obwohl das Portfolio ueber
+            # dem Startkapital lag. Es ist also kein Tageswert, sondern der Abstand
+            # zum hoechsten dieser Anker — faktisch ein Ruecksetzer vom Hoch. Genau
+            # das steuert auch TAGESLIMIT, darum bleibt die Zahl erhalten, sie heisst
+            # nur noch ehrlich.
+            # Zusaetzlich "Heute": echte Veraenderung seit UTC-Mitternacht aus dem
+            # persistierten Tagesanker in daily_summary_state.json.
+            _day_start = daily_summary.day_start_value()
+            if _day_start and _day_start > 0:
+                _today_pct = (portfolio_val - _day_start) / _day_start * 100
+                _today_txt = f"Heute: {_today_pct:+.2f}% (ab {_day_start:.2f})"
+            else:
+                _today_txt = "Heute: n/a"
+            print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | "
+                  f"{_today_txt} | "
+                  f"Rücksetzer: {daily_pnl:+.2f}% (Anker {risk_mgr.daily_start_value:.2f}) | "
+                  f"über Boden: {cap_pnl:+.2f}% (Boden {risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
 
             # 11.06.2026 (Option B) / 15.06.2026 (Zwei-Stufen-Fix): KAPITAL-Schutz.
             # Stufe 1 — SOFT (portfolio < capital_floor, aber >= hard_stop_floor):
@@ -1126,10 +1146,10 @@ def run_bot():
                             allow_short_entries = True
                             print(f"  [PROTECT-Escape] BTC 15m {chg_p*100:+.2f}% < -0.1% → Shorts erlaubt (Recovery-Mode)")
                 if allow_short_entries:
-                    print(f"  [PROTECT] Tages-P&L {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
+                    print(f"  [PROTECT] Rücksetzer {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
                     allow_long_entries = False
                 else:
-                    print(f"  [PROTECT] Tages-P&L {daily_pnl:+.2f}% — keine neuen Trades (Markt {regime_state}), Trailing-SL aktiv")
+                    print(f"  [PROTECT] Rücksetzer {daily_pnl:+.2f}% — keine neuen Trades (Markt {regime_state}), Trailing-SL aktiv")
                     print(f"\n  Next scan in {Config.CHECK_INTERVAL}s...")
                     time.sleep(Config.CHECK_INTERVAL)
                     continue
@@ -1684,7 +1704,7 @@ def run_bot():
                 print(f"\n  Total trades: {summary['total_trades']} | "
                       f"Realisiert: {summary['realized_pnl']:+.2f}EUR | "
                       f"Fees: {summary['total_fees_eur']:.4f}EUR | "
-                      f"Tages-P&L: {daily_pnl:+.2f}%")
+                      f"Rücksetzer: {daily_pnl:+.2f}%")
 
             if risk_mgr.open_positions:
                 print(f"\n  Open positions ({len(risk_mgr.open_positions)}):")

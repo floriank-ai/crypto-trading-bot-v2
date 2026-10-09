@@ -73,6 +73,22 @@ class DailySummary:
         except OSError as e:
             print(f"  [DailySummary] State-Save Fehler: {e}")
 
+    def day_start_value(self) -> float | None:
+        """Portfoliowert bei Beginn des aktuellen UTC-Tages, oder None.
+
+        09.10.2026 hinzugefuegt: das ist der EINZIGE ehrliche Tagesanker im Bot.
+        risk_manager.daily_start_value taugt dafuer nicht — der wird an fuenf
+        Stellen gesetzt (Mitternacht, Neustart, HWM-Peak, Reset, init) und
+        zeigte deshalb z.B. "+0.00%" direkt nach einem Deploy und "-10.05%"
+        nach einem HWM-Event, obwohl das Portfolio im Plus stand. Dieser Wert
+        hier wird nur beim UTC-Tageswechsel neu gesetzt und ist persistiert.
+        """
+        v = self._state.get("day_start_portfolio")
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
     @staticmethod
     def _today_utc() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%d")

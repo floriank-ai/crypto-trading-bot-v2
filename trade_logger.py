@@ -40,7 +40,7 @@ class TradeLogger:
     def log_trade(self, pair: str, side: str, volume: float, price: float,
                   cost: float, fee: float, mode: str, strategy: str = "",
                   signal_reason: str = "", balance_after: float = 0,
-                  realized_pnl: float = None, fee_type: str = None,
+                  realized_pnl: float = None, fee_type: str = "taker",
                   fee_rate: float = None):
         timestamp = datetime.now().isoformat()
         total = cost + fee if side == "buy" else cost - fee
@@ -65,12 +65,20 @@ class TradeLogger:
         # 09.10.2026: maker/taker mitschreiben, damit der Effekt der Limit-Exits
         # messbar ist. Bewusst NUR ins JSON — die CSV hat ein festes Schema mit
         # 12 Spalten und eine 13. wuerde alte und neue Zeilen inkonsistent machen
-        # (csv.DictReader wirft den Extra-Wert in restkey). Der Typ ist zur Not
-        # auch aus signal_reason ableitbar (take_profit/partial_tp = maker).
-        if fee_type is not None:
-            trade["fee_type"] = fee_type
-        if fee_rate is not None:
-            trade["fee_rate"] = fee_rate
+        # (csv.DictReader wirft den Extra-Wert in restkey).
+        #
+        # Default "taker" ist faktisch korrekt: verifiziert am 09.10.2026, dass
+        # von 11 place_order-Aufrufstellen in main.py nur ZWEI order_type
+        # uebergeben (Partial-TP und der SL/TP-Exit, und dort nur fuer
+        # take_profit). Alle anderen sind definitionsgemaess Market-Orders.
+        # Die zwei limit-faehigen Stellen reichen den echten Wert der Exchange
+        # durch und ueberschreiben diesen Default.
+        # ACHTUNG fuer spaeter: wer eine NEUE Limit-Order-Stelle baut, muss
+        # fee_type mitgeben — sonst wird sie hier still als taker gezaehlt.
+        trade["fee_type"] = fee_type
+        # fee_rate nicht uebernehmen, sondern aus den echten Betraegen ableiten.
+        # Das ist immer die Wahrheit, unabhaengig davon was uebergeben wurde.
+        trade["fee_rate"] = round(fee / cost, 6) if cost else 0.0
 
         trades = []
         if os.path.exists(self.json_path):
