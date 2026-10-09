@@ -241,29 +241,72 @@ class GainerStrategy:
         # 0 Gainer-Trades über 22h weil JEDE Konsolidierungs-Candle (-0.1% rot) das
         # Setup killte — APE +20% wurde stundenlang abgewiesen. Tolerieren jetzt bis
         # -0.3% rot (= flache Konsolidierung). Tiefer rot bleibt Skip.
-        last_close = close.iloc[-1]
-        last_open = open_.iloc[-1]
-        candle_pct = (last_close - last_open) / last_open if last_open > 0 else 0
-        if candle_pct < -0.003:  # mehr als -0.3% rot = echtes Drehen
+        # 09.10.2026 (BUG-FIX, vorbestehend): fetch_ohlcv liefert als LETZTE Kerze
+        # immer die noch LAUFENDE Periode. Verifiziert um 09:30:53 UTC an STRK/EUR:
+        # die 09:30-Kerze war 53s alt, Body +0.32%, Volumen 18.559 gegen ~300.000
+        # bei den fertigen Kerzen (~6%).
+        # Folge für den ALTEN Code: der Volumenfilter verglich dieses Bruchteil-
+        # Volumen gegen den 20er-Durchschnitt und lehnte deshalb fast immer ab
+        # ("Volume fading"). Die Gainer-Strategie konnte praktisch nur in den
+        # letzten Minuten einer Kerzenperiode auslösen — das erklaert die nur 147
+        # Trades über Monate. Body war aus demselben Grund fast immer ~0.00%.
+        # Deshalb: Kerzenfarbe, Volumen und Steigung auf der letzten
+        # ABGESCHLOSSENEN Kerze (-2) bewerten. Der Peak-Schutz unten nutzt weiter
+        # den LIVE-Preis (-1), denn den würden wir tatsächlich zahlen.
+        ci = -2 if len(df) >= 2 else -1
+        last_close = close.iloc[-1]          # Live-Preis (für Peak-Check & Preisangabe)
+        closed_close = close.iloc[ci]
+        closed_open = open_.iloc[ci]
+        candle_pct = (closed_close - closed_open) / closed_open if closed_open > 0 else 0
+        # 09.10.2026 (User-Vorgabe "nur echte gainer die noch nach oben gehen"):
+        # vorher war hier -0.003, d.h. eine bis zu 0.3% ROTE Kerze galt als ok
+        # ("flache Konsolidierung"). Damit kaufte der Bot in die Abkühlung statt in
+        # die Fortsetzung. Jetzt muss die Kerze echt grün sein.
+        if candle_pct < Config.GAINER_MIN_CANDLE_PCT:
             return {"signal": Signal.HOLD,
-                    "reason": f"Letzte 15m {candle_pct*100:.2f}% rot — Momentum dreht bereits",
+                    "reason": f"Letzte 15m {candle_pct*100:+.2f}% (<{Config.GAINER_MIN_CANDLE_PCT*100:.1f}% grün) — keine Fortsetzung",
                     "strategy": "gainer"}
 
-        # Volume: must still have elevated volume (not fading)
-        avg_vol = df["volume"].rolling(20).mean().iloc[-1]
-        if avg_vol > 0 and df["volume"].iloc[-1] < avg_vol * 0.7:
+        # Volume: muss WEITER erhöht sein, nicht nur "nicht eingebrochen".
+        # 09.10.2026: Faktor 0.7 → GAINER_MIN_VOL_RATIO (1.0). Bei 0.7 durfte das
+        # Volumen auf 70% des Durchschnitts abfallen und der Entry ging trotzdem
+        # durch — ein abflauender Pump.
+        # Durchschnitt ebenfalls nur über abgeschlossene Kerzen, sonst zieht die
+        # laufende Kerze den Mittelwert nach unten.
+        avg_vol = df["volume"].iloc[:-1].rolling(20).mean().iloc[-1] if len(df) >= 2 else 0
+        closed_vol = df["volume"].iloc[ci]
+        if avg_vol > 0 and closed_vol < avg_vol * Config.GAINER_MIN_VOL_RATIO:
+            vr = closed_vol / avg_vol
             return {"signal": Signal.HOLD,
-                    "reason": "Volume fading — momentum dying",
+                    "reason": f"Volumen {vr:.2f}x Durchschnitt (<{Config.GAINER_MIN_VOL_RATIO:.2f}x) — Momentum flaut ab",
                     "strategy": "gainer"}
+
+        # 09.10.2026 NEU: kurzfristige Steigung. Das ist der eigentliche Nachweis
+        # "geht noch nach oben" — vorher prüfte das KEIN Filter. Close muss über dem
+        # Close von GAINER_SLOPE_LOOKBACK Kerzen vorher liegen (3*15m = 45min).
+        lb = Config.GAINER_SLOPE_LOOKBACK
+        if lb > 0 and len(close) > abs(ci) + lb:
+            ref = close.iloc[ci - lb]
+            if ref > 0:
+                slope_pct = (closed_close - ref) / ref
+                if slope_pct <= 0:
+                    return {"signal": Signal.HOLD,
+                            "reason": f"{lb*15}min-Steigung {slope_pct*100:+.2f}% — läuft nicht mehr nach oben",
+                            "strategy": "gainer"}
 
         # 29.04.2026 Peak-Schutz: nicht am absoluten 4h-Hoch einsteigen.
         # Nachdem 15m-rot-Filter gelockert ist (Konsolidierung tolerant), brauchen wir
         # einen Hard-Cap gegen FOMO-Peaks: Preis muss min 1.5% unter dem Hoch der
         # letzten 16 15m-Candles (=4h) sein. Coins die exakt am 4h-High kleben sind
         # statistisch im Top-Bereich des Pumps.
+        # 09.10.2026: Schwelle 0.985 → GAINER_MAX_OF_4H_HIGH (0.995). Ein Coin, der
+        # mit grüner Kerze und steigendem Volumen weiterläuft, steht zwangsläufig
+        # nahe seinem 4h-Hoch — die alte 1.5%-Pflichtdistanz hätte jede echte
+        # Fortsetzung abgewiesen und war der Kern des Dip-Kauf-Verhaltens. Der
+        # Schutz bleibt: AM oder ÜBER dem Hoch wird weiterhin nicht gekauft.
         if len(df) >= 16:
             high_4h = df["high"].iloc[-16:].max()
-            if high_4h > 0 and last_close >= high_4h * 0.985:
+            if high_4h > 0 and last_close >= high_4h * Config.GAINER_MAX_OF_4H_HIGH:
                 pct_below_high = (last_close - high_4h) / high_4h * 100
                 return {"signal": Signal.HOLD,
                         "reason": f"Preis {pct_below_high:+.2f}% am 4h-High {high_4h:.4f} — Peak-Risiko",

@@ -177,6 +177,18 @@ class RiskManager:
         (0.025, 0.33),
         (0.05,  0.33),
     ]
+    # 09.10.2026 (User-Vorgabe "Gewinn machen und schnell wieder aussteigen"):
+    # eigene, frühere und größere Stufen für Gainer-Pumps. Ein Pump läuft kurz und
+    # dreht schnell — da ist ein Spatz in der Hand mehr wert:
+    #   +2%  → 40% raus
+    #   +4%  → weitere 40% raus (insg. 80% gesichert)
+    #   Rest 20% läuft mit Trailing-SL bis GAINER_TP_PCT (7%)
+    # Gegenprobe Gebühren: 40% einer ~100-EUR-Position = 40 EUR, Fee 0.26% =
+    # 0.10 EUR pro Teilverkauf — der gesicherte Gewinn ist ein Vielfaches davon.
+    GAINER_PARTIAL_TP_STAGES = [
+        (0.02, 0.40),
+        (0.04, 0.40),
+    ]
 
     def check_partial_tp(self, symbol: str, current_price: float):
         """
@@ -198,7 +210,10 @@ class RiskManager:
 
         taken = pos.get("partial_tps_taken", [])
         initial_volume = pos.get("initial_volume", pos["volume"])
-        for idx, (trigger, fraction) in enumerate(self.PARTIAL_TP_STAGES):
+        # 09.10.2026: Gainer bekommen die früheren/größeren Stufen.
+        stages = (self.GAINER_PARTIAL_TP_STAGES
+                  if pos.get("strategy") == "gainer" else self.PARTIAL_TP_STAGES)
+        for idx, (trigger, fraction) in enumerate(stages):
             if idx in taken:
                 continue
             if pnl_pct >= trigger:

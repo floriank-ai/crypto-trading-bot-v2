@@ -1010,14 +1010,17 @@ def run_bot():
             ts_max_pnl = Config.POSITION_TIME_STOP_MAX_PNL_PCT / 100.0
             for sym in list(risk_mgr.open_positions.keys()):
                 pos = risk_mgr.open_positions[sym]
-                if pos.get("strategy") in ("gainer", "dca", "grid"):
+                strat_name = pos.get("strategy")
+                # 09.10.2026: "gainer" ist NICHT mehr ausgenommen (User-Vorgabe
+                # "schnell wieder aussteigen"). Vorher konnte eine Gainer-Position
+                # unbegrenzt liegen bleiben, obwohl ein Pump kurzlebig ist.
+                # dca/grid bleiben ausgenommen — die haben echte Akkumulationslogik.
+                if strat_name in ("dca", "grid"):
                     continue
                 opened_at = pos.get("opened_at", 0)
                 if not opened_at:
                     continue  # Alt-Positionen ohne Zeitstempel ignorieren (Restart-safe)
                 age_h = (time.time() - opened_at) / 3600
-                if age_h < Config.POSITION_TIME_STOP_HOURS:
-                    continue
                 ticker = exchange.get_ticker(sym)
                 cur = (ticker or {}).get("last")
                 if not cur:
@@ -1026,11 +1029,29 @@ def run_bot():
                 pnl_pct = (cur - pos["entry_price"]) / pos["entry_price"]
                 if d == "short":
                     pnl_pct = -pnl_pct
-                if abs(pnl_pct) > ts_max_pnl:
-                    continue  # Position lebt noch — TP/SL kann greifen
-                # Flatlined → close. SHORT braucht buy-to-cover, LONG ein sell.
-                print(f"  [TimeStop] {sym} {d.upper()} {age_h:.1f}h offen, "
-                      f"P&L {pnl_pct*100:+.2f}% (innerhalb ±{Config.POSITION_TIME_STOP_MAX_PNL_PCT}%) → Soft-Close")
+
+                if strat_name == "gainer":
+                    # Gainer-Timeout: nach GAINER_MAX_HOLD_HOURS raus, WENN der Pump
+                    # nicht mal die erste Partial-TP-Stufe (+2%) erreicht hat. Läuft
+                    # er darüber, lassen wir Trailing/TP weiterarbeiten statt einen
+                    # Gewinner abzuwürgen.
+                    if age_h < Config.GAINER_MAX_HOLD_HOURS:
+                        continue
+                    gainer_first_tp = risk_mgr.GAINER_PARTIAL_TP_STAGES[0][0]
+                    if pnl_pct >= gainer_first_tp:
+                        continue
+                    ts_reason = "gainer_timeout"
+                    print(f"  [GainerTimeout] {sym} {age_h:.1f}h offen, P&L {pnl_pct*100:+.2f}% "
+                          f"(< erste TP-Stufe +{gainer_first_tp*100:.0f}%) → Pump vorbei, Close")
+                else:
+                    if age_h < Config.POSITION_TIME_STOP_HOURS:
+                        continue
+                    if abs(pnl_pct) > ts_max_pnl:
+                        continue  # Position lebt noch — TP/SL kann greifen
+                    ts_reason = "time_stop_flatlined"
+                    # Flatlined → close. SHORT braucht buy-to-cover, LONG ein sell.
+                    print(f"  [TimeStop] {sym} {d.upper()} {age_h:.1f}h offen, "
+                          f"P&L {pnl_pct*100:+.2f}% (innerhalb ±{Config.POSITION_TIME_STOP_MAX_PNL_PCT}%) → Soft-Close")
                 close_side = "buy" if d == "short" else "sell"
                 res = exchange.place_order(sym, close_side, pos["volume"], direction=d)
                 if res["status"] != "ok":
@@ -1047,7 +1068,7 @@ def run_bot():
                     logger.log_trade(pair=sym, side=log_side, volume=pos["volume"],
                                      price=cp, cost=cost, fee=fee,
                                      mode=Config.TRADING_MODE, strategy=pos["strategy"],
-                                     signal_reason="time_stop_flatlined",
+                                     signal_reason=ts_reason,
                                      balance_after=exchange.get_balance(),
                                      realized_pnl=pnl_eur)
                     risk_mgr.close_position(sym)
@@ -1146,8 +1167,11 @@ def run_bot():
             # Mega-Gainer-Alarm: KuCoin-weiter Scan (alles, nicht nur Kraken-EUR),
             # damit Pumps wie CHIP (+600%) gepingt werden selbst wenn Kraken sie
             # nicht listet. Max alle 5 Minuten um KuCoin-API zu schonen.
+            # 09.10.2026 (User-Wunsch): per MEGA_GAINER_ALERTS abschaltbar. Der Block
+            # war reine Telegram-Info (nur notifier.send, nie ein place_order). Mit
+            # dem Flag auf 0 entfällt auch der KuCoin-Scan über alle USDT-Paare.
             mega_now = time.time()
-            if mega_now - last_mega_scan_ts >= 300:
+            if Config.MEGA_GAINER_ALERTS and mega_now - last_mega_scan_ts >= 300:
                 last_mega_scan_ts = mega_now
                 mega_cutoff = mega_now - Config.MEGA_GAINER_DEBOUNCE_HOURS * 3600
                 for k, ts in list(alerted_mega_gainers.items()):

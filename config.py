@@ -233,7 +233,39 @@ class Config:
     GAINER_MAX_GAIN_24H = float(os.getenv("GAINER_MAX_GAIN_24H", 40.0)) # max 24h gain % — >40% = Pump gelaufen, nicht kaufen
     GAINER_RSI_MAX = float(os.getenv("GAINER_RSI_MAX", 72.0))           # RSI-Cap — >72 = overbought, top-buying-Risiko
     GAINER_SL_PCT = float(os.getenv("GAINER_SL_PCT", 0.04))             # stop loss 4% (was 6% — zu viel Slippage bei Micro-Caps)
-    GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.12))             # take profit 12% (partial-TP + trail vorher)
+    # 09.10.2026: TP 12% → 7%. User-Vorgabe "Gewinn machen und schnell wieder
+    # aussteigen". 12% war für einen Pump-Trade zu weit — der Rest-Anteil nach den
+    # Partial-TPs ritt viel zu lange. Forensik: gainer hatte brutto nur +21.07 EUR
+    # auf 147 Trades, bei 33.83 EUR Fees → netto -12.77. Der Edge ist da, aber dünn;
+    # er muss früher eingesammelt werden statt auf ein 12%-Ziel zu hoffen.
+    GAINER_TP_PCT = float(os.getenv("GAINER_TP_PCT", 0.07))
+
+    # --- 09.10.2026: Gainer-Entry auf FORTSETZUNG statt Dip-Kauf (User-Vorgabe:
+    # "nur echte gainer die noch nach oben gehen mitgenommen werden").
+    # Die alten Filter tolerierten bewusst Konsolidierung: rote Kerze bis -0.3% ok,
+    # Volumen bis auf 70% abfallend ok, Preis MUSSTE 1.5% unter dem 4h-Hoch sein.
+    # Das kaufte in die Abkühlung. Jetzt umgekehrt: grüne Kerze, Volumen weiter
+    # erhöht, kurzfristige Steigung positiv. Die echten Top-Buying-Schutzmechanismen
+    # (RSI-Cap 72, Max-Gain-Cap 40%) bleiben unverändert — die Lehre aus SPK +50%
+    # bei RSI 79 (-9.02 EUR) gilt weiter.
+    # Mindest-Grün der letzten 15m-Kerze (0.001 = +0.1%, filtert Dojis).
+    GAINER_MIN_CANDLE_PCT = float(os.getenv("GAINER_MIN_CANDLE_PCT", 0.001))
+    # Volumen der letzten Kerze muss mind. dieses Vielfache des 20er-Durchschnitts
+    # sein. 1.0 = nicht abfallend (vorher 0.7 = bis 30% Abfall erlaubt).
+    GAINER_MIN_VOL_RATIO = float(os.getenv("GAINER_MIN_VOL_RATIO", 1.0))
+    # Kurzfristige Steigung: Close muss über dem Close von N Kerzen vorher liegen
+    # (3 * 15m = 45min netto aufwärts). Das ist der eigentliche "geht noch nach
+    # oben"-Nachweis, den vorher kein Filter geprüft hat.
+    GAINER_SLOPE_LOOKBACK = int(os.getenv("GAINER_SLOPE_LOOKBACK", 3))
+    # Peak-Schutz gelockert: 0.985 → 0.995. Ein Coin, der mit grüner Kerze und
+    # steigendem Volumen läuft, steht naturgemäß NAHE seinem 4h-Hoch — die alte
+    # 1.5%-Distanz hätte jede echte Fortsetzung abgewiesen. Er darf aber weiterhin
+    # nicht AM oder ÜBER dem Hoch gekauft werden.
+    GAINER_MAX_OF_4H_HIGH = float(os.getenv("GAINER_MAX_OF_4H_HIGH", 0.995))
+    # Schnell wieder raus: Gainer waren bisher vom Time-Stop AUSGENOMMEN und konnten
+    # unbegrenzt liegen. Wenn der Pump nach dieser Zeit nicht mal die erste
+    # Partial-TP-Stufe erreicht hat, ist er vorbei → schließen.
+    GAINER_MAX_HOLD_HOURS = float(os.getenv("GAINER_MAX_HOLD_HOURS", 6.0))
     GAINER_SCAN_INTERVAL_MINUTES = int(os.getenv("GAINER_SCAN_INTERVAL_MINUTES", 15))
     # Telegram-Alarm ab diesem 24h-Gewinn (unabhaengig von Slot-Status — damit du
     # manuell entscheiden kannst, auch wenn Slots voll sind). Debounce 4h pro Symbol.
@@ -246,6 +278,12 @@ class Config:
     MEGA_GAINER_THRESHOLD = float(os.getenv("MEGA_GAINER_THRESHOLD", 100.0))
     MEGA_GAINER_MIN_VOL_USDT = float(os.getenv("MEGA_GAINER_MIN_VOL_USDT", 500_000))
     MEGA_GAINER_DEBOUNCE_HOURS = float(os.getenv("MEGA_GAINER_DEBOUNCE_HOURS", 6.0))
+    # 09.10.2026 (User-Wunsch): Mega-Gainer-Alarm AUS. Er war reine Telegram-Info
+    # und hat nie gehandelt (keine place_order im Pfad). Nebeneffekt des Abschaltens:
+    # der teure KuCoin-fetch_tickers-Scan über ALLE USDT-Paare alle 5 Minuten
+    # entfällt komplett — das war die Quelle der "[MegaGainer] Error: kucoin ..."
+    # Meldungen. Auf 1 setzen, um die Pings wieder einzuschalten.
+    MEGA_GAINER_ALERTS = os.getenv("MEGA_GAINER_ALERTS", "0") == "1"
 
     # Grid
     GRID_LEVELS = int(os.getenv("GRID_LEVELS", 10))
