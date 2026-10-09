@@ -325,7 +325,17 @@ class RiskManager:
     # 4 SHORTs * 20% = 80% Exposure → bei 2% Markt-Pump max -16 EUR. Bei 5 waeren
     # es 100% Exposure (-20 EUR pro 2% Pump) — zu viel Klumpenrisiko.
     MAX_LONG_POSITIONS = 3
-    MAX_SHORT_POSITIONS = 4
+    # 09.10.2026: 4 → 5. Bei MOMENTUM_MIN_HOLD_HOURS=12 limitieren die Slots den
+    # Durchsatz stärker als die Signalsuche: 4 Slots * 12h Mindesthaltedauer =
+    # höchstens ~8 Einstiege/Tag, realistisch 2-4. Ein Slot mehr = ~25% mehr
+    # Trades bei gleicher Einstiegsqualität.
+    # RISIKO ehrlich beziffert: 5 Shorts * 20% Margin bei ~250-EUR-Positionen =
+    # 250 EUR Margin, 1250 EUR Notional auf 1000 EUR Konto. Nach oben begrenzt
+    # durch den SL von 4% pro Position: wenn ALLE fünf gleichzeitig ausgestoppt
+    # werden, sind das ~4% * 1250 = -50 EUR = -5% des Kontos. Tragbar.
+    # Bewusst NICHT höher: korrelierte Shorts in einer Rally waren genau das,
+    # woran das Konto schon einmal geblutet hat (13.07.2026).
+    MAX_SHORT_POSITIONS = 5
 
     def discretionary_exit_allowed(self, symbol: str) -> bool:
         """Darf ein ERMESSENS-Exit diese Position schließen?

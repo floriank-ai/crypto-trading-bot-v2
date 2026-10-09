@@ -306,7 +306,16 @@ class Config:
 
     # Scanner
     SCAN_TOP_N = int(os.getenv("SCAN_TOP_N", 50))
-    AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 10))
+    # 09.10.2026: 10 → 25. User-Frage "kann man nicht mehr Trades machen?".
+    # Der Scanner bewertet 50 Coins, aber main.py analysierte nur die Top 10 auf
+    # Momentum-Signale (scan_results[:AUTO_PICK_COUNT]) — die anderen 40 wurden
+    # nie angesehen. Das ist der richtige Weg zu mehr Trades: breiter SUCHEN,
+    # nicht die Einstiegslatte senken. Die Qualität pro Trade bleibt identisch,
+    # es werden nur mehr Breakdown-Setups überhaupt gefunden.
+    # Obergrenze bewusst 25 und nicht 50: pro Symbol fällt ein OHLCV-Abruf an,
+    # und bei CHECK_INTERVAL=60s würden 50 Abrufe das Zyklusbudget und Krakens
+    # Rate-Limit sprengen. 25 passt mit Reserve.
+    AUTO_PICK_COUNT = int(os.getenv("AUTO_PICK_COUNT", 25))
 
     # Grid-Strategie skipt Coins unter dieser Preisschwelle.
     # Audit 08.05.2026: AI 0.03EUR, BILL 0.06EUR, BIO 0.04EUR, DOGE 0.09EUR
