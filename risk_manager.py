@@ -208,9 +208,19 @@ class RiskManager:
         else:
             pnl_pct = (entry - current_price) / entry
 
+        # 09.10.2026: Partial-TPs für momentum/sentiment standardmäßig AUS.
+        # Begründung aus der Forensik (1402 Round-Trips, echte Gebühren):
+        # die Stufen bei +2.5%/+5% feuern typisch innerhalb weniger Stunden —
+        # genau der Haltedauer-Bereich, der verliert (<1h +0.16%, 1-4h +0.32%),
+        # während 12h-3d +2.33% bis +3.21% bringt. Ein Teilverkauf nach 2h
+        # beendet also gerade den Lauf, der den Gewinn gemacht hätte.
+        # Für gainer bleiben sie an: dort IST schnelles Mitnehmen der Zweck.
+        if pos.get("strategy") != "gainer" and not Config.PARTIAL_TP_FOR_MOMENTUM:
+            return None
+
         taken = pos.get("partial_tps_taken", [])
         initial_volume = pos.get("initial_volume", pos["volume"])
-        # 09.10.2026: Gainer bekommen die früheren/größeren Stufen.
+        # Gainer bekommen die früheren/größeren Stufen.
         stages = (self.GAINER_PARTIAL_TP_STAGES
                   if pos.get("strategy") == "gainer" else self.PARTIAL_TP_STAGES)
         for idx, (trigger, fraction) in enumerate(stages):
@@ -316,6 +326,44 @@ class RiskManager:
     # es 100% Exposure (-20 EUR pro 2% Pump) — zu viel Klumpenrisiko.
     MAX_LONG_POSITIONS = 3
     MAX_SHORT_POSITIONS = 4
+
+    def discretionary_exit_allowed(self, symbol: str) -> bool:
+        """Darf ein ERMESSENS-Exit diese Position schließen?
+
+        09.10.2026. Ermessens-Exits sind Time-Stop, Rotation, Marktkontext-Exit
+        und der HWM-Loser-Cut — alles Mechanismen, die eine Position NICHT
+        wegen ihres eigenen Kursziels schließen, sondern aus Portfolio-Gründen.
+        Stop-Loss und Take-Profit sind bewusst NICHT betroffen: die müssen in
+        jedem Zustand feuern, sonst entsteht wieder ein unverwalteter Bestand
+        wie im 78-Tage-Deadlock.
+
+        Hintergrund: die Forensik zeigt Ø-Bewegung nach Haltedauer
+        (<1h +0.16%, 1-4h +0.32%, 4-12h +0.40%, 12-24h +2.33%, 1-3d +3.21%).
+        Der Gewinn entsteht also erst ab ~12h. Jeder Ermessens-Exit davor
+        schneidet genau den Lauf ab, der ihn verdient hätte — und kostet dabei
+        1.20% Round-Trip. Darum erst ab MOMENTUM_MIN_HOLD_HOURS erlaubt.
+
+        gainer ist ausgenommen: dort ist schnelles Ein und Aus der Zweck, die
+        Position hat ihr eigenes GAINER_MAX_HOLD_HOURS-Limit.
+        """
+        pos = self.open_positions.get(symbol)
+        if not pos:
+            return False
+        if pos.get("strategy") in ("gainer", "dca", "grid"):
+            return True
+        opened_at = pos.get("opened_at", 0)
+        if not opened_at:
+            return True  # Alt-Position ohne Zeitstempel: nicht blockieren
+        age_h = (time.time() - opened_at) / 3600
+        return age_h >= Config.MOMENTUM_MIN_HOLD_HOURS
+
+    def position_age_hours(self, symbol: str) -> float:
+        """Alter der Position in Stunden, 0 wenn unbekannt."""
+        pos = self.open_positions.get(symbol)
+        if not pos:
+            return 0.0
+        opened_at = pos.get("opened_at", 0)
+        return (time.time() - opened_at) / 3600 if opened_at else 0.0
 
     def get_weakest_position(self, exchange) -> str | None:
         """Return the symbol of the worst-performing open position (for rotation)."""

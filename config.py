@@ -119,6 +119,50 @@ class Config:
     # als Limit zu fahren würde die Strategie verändern, nicht nur verbilligen.
     USE_LIMIT_EXITS = os.getenv("USE_LIMIT_EXITS", "1") == "1"
 
+    # ── 09.10.2026: UMBAU AUF PROFITABILITÄT ──────────────────────────────
+    # Datenbasis: 1402 echte Round-Trips (27.04.-29.09.2026), EUR-gewichtet,
+    # mit den ECHTEN Kraken-Gebühren gerechnet (Entry taker 0.80% + Exit
+    # maker 0.40% = 1.20% Round-Trip):
+    #   ALLES (Ist-Zustand)              1402 Trades  Brutto 298  Fees 956  NETTO -658
+    #   nur Shorts                        680 Trades  Brutto 469  Fees 516  NETTO  -47
+    #   nur Breakdown-Short               665 Trades  Brutto 498  Fees 496  NETTO   +2
+    #   Breakdown-Short, 12h-7d gehalten  293 Trades  Brutto 496  Fees 187  NETTO +309
+    # Mechanismus: von 1402 auf 293 Trades senkt die Gebühren von 956 auf 187,
+    # während der Brutto-Gewinn STEIGT (298 -> 496), weil die verlustbringenden
+    # Teilmengen wegfallen. Ø-Bewegung nach Haltedauer (ungewichtet):
+    #   <1h +0.16%  1-4h +0.32%  4-12h +0.40%  12-24h +2.33%  1-3d +3.21%  >3d +0.50%
+    # Scalping verliert, 12h-3d gewinnt, >3d wird wieder schlechter.
+    # Ø-Bewegung nach Setup: Breakdown-SHORT +2.12%, Breakout-LONG -0.88%.
+    #
+    # EHRLICHE VORBEHALTE:
+    #  - Das ist eine In-Sample-Auswahl aus denselben Daten (Curve-Fitting-Risiko).
+    #    Gemildert durch grosse Stichprobe (293-665) und einfache Logik, nicht aufgehoben.
+    #  - Der Zeitraum Mai-Sep 2026 begünstigte Shorts. In einem anhaltenden
+    #    Bullenmarkt dreht das Ergebnis voraussichtlich.
+    #  - Haltedauer ist beim Einstieg NICHT wählbar. Sie entsteht indirekt durch
+    #    MOMENTUM_MIN_HOLD_HOURS + das Abschalten der frühen Exits.
+    #
+    # Nur das Breakdown-Short-Setup handeln. Der Breakout-Long hatte über 310
+    # Trades einen negativen BRUTTO-Edge (-0.88%/Trade) — er ist nicht zu retten.
+    MOMENTUM_ALLOW_BREAKOUT_LONG = os.getenv("MOMENTUM_ALLOW_BREAKOUT_LONG", "0") == "1"
+    # RSI-Mean-Reversion feuerte in 5 Monaten exakt 3x — irrelevant, aber explizit aus.
+    MOMENTUM_ALLOW_RSI_REVERSION = os.getenv("MOMENTUM_ALLOW_RSI_REVERSION", "0") == "1"
+    # Mindest-Haltedauer, bevor ein ERMESSENS-Exit greifen darf (Time-Stop,
+    # Rotation, Marktkontext, HWM-Loser-Cut). Stop-Loss und Take-Profit sind
+    # davon NIE betroffen — die müssen in jedem Zustand funktionieren.
+    # Das ist die Umsetzung von "Gewinner 12h+ laufen lassen".
+    MOMENTUM_MIN_HOLD_HOURS = float(os.getenv("MOMENTUM_MIN_HOLD_HOURS", 12.0))
+    # Obergrenze: >3d wurde in den Daten wieder schlechter (+0.50% statt +3.21%).
+    # Nach dieser Zeit wird geschlossen, egal wie sie liegt.
+    MOMENTUM_MAX_HOLD_DAYS = float(os.getenv("MOMENTUM_MAX_HOLD_DAYS", 7.0))
+    # Partial-TPs für momentum AUS: sie feuern bei +2.5%/+5% und damit meist
+    # innerhalb weniger Stunden — genau im Bereich, der verliert (<1h +0.16%,
+    # 1-4h +0.32%). Für gainer bleiben sie an, da ist schnelles Mitnehmen der Sinn.
+    PARTIAL_TP_FOR_MOMENTUM = os.getenv("PARTIAL_TP_FOR_MOMENTUM", "0") == "1"
+    # Rotation komplett aus: schlechteste EV im ganzen Bot (-0.85/Trade) und sie
+    # zerstört per Definition die Haltedauer, die wir gerade erreichen wollen.
+    ROTATION_ENABLED = os.getenv("ROTATION_ENABLED", "0") == "1"
+
     # Strategies
     # 28.04.2026: grid dazu — Audit zeigte 75% NEUTRAL-Cycles, Grid ist regime-exempt
     # und confirmt zusätzlich Sentiment-LONG. Mehr Signal-Quellen = mehr 2-3%/Tag-Chancen.

@@ -31,7 +31,10 @@ INITIAL_CAPITAL = 1000.0
 POSITION_SIZE_PCT = 0.20   # 20% des Kapitals pro Trade
 STOP_LOSS_PCT     = Config.STOP_LOSS_PCT
 TAKE_PROFIT_PCT   = Config.TAKE_PROFIT_PCT
-FEE_PCT           = 0.0026
+# 09.10.2026: aus der Config statt hart 0.0026. Der Backtest muss mit den
+# ECHTEN Kraken-Gebuehren rechnen (Tier 1: 0.80% taker), sonst beschoenigt er
+# das Ergebnis um den Faktor 3 und man optimiert auf eine Fiktion.
+FEE_PCT           = Config.TAKER_FEE_PCT
 TIMEFRAME         = "15m"
 CANDLE_LIMIT      = 700    # ~1 Woche bei 15min-Kerzen
 WARMUP_CANDLES    = 50     # Mindest-Kerzen für Indikatoren
@@ -315,20 +318,27 @@ def run_backtest(df, symbol, time_limit_candles=None, btc_df=None, direction="bo
             sig = strategy.analyze(window)
 
             if sig["signal"] == Signal.BUY:
+                # 09.10.2026 (BUG-FIX): hier standen zwei wirkungslose `pass` und
+                # der Positionsaufbau lief UNBEDINGT danach — ohne `else`. Der
+                # Long-Zweig ignorierte damit sowohl direction="short" als auch
+                # den BTC-Bearish-Filter, waehrend der SELL-Zweig darunter korrekt
+                # ein `else:` hat. Jeder richtungsbasierte Vergleich war dadurch
+                # verfaelscht (es wurden immer Longs mitgehandelt).
                 if direction == "short":
-                    pass  # nur Shorts erlaubt
+                    pass  # nur Shorts erlaubt → kein Long
                 elif btc_df is not None and btc_bearish:
                     pass  # kein Long bei BTC-Abwärtstrend
-                pos_value = balance * POSITION_SIZE_PCT
-                fee = pos_value * FEE_PCT
-                volume = pos_value / price
-                balance -= pos_value + fee
-                position = {
-                    "entry": price, "volume": volume, "direction": "long",
-                    "sl": price * (1 - STOP_LOSS_PCT),
-                    "tp": price * (1 + TAKE_PROFIT_PCT),
-                    "margin": pos_value, "entry_candle": i,
-                }
+                else:
+                    pos_value = balance * POSITION_SIZE_PCT
+                    fee = pos_value * FEE_PCT
+                    volume = pos_value / price
+                    balance -= pos_value + fee
+                    position = {
+                        "entry": price, "volume": volume, "direction": "long",
+                        "sl": price * (1 - STOP_LOSS_PCT),
+                        "tp": price * (1 + TAKE_PROFIT_PCT),
+                        "margin": pos_value, "entry_candle": i,
+                    }
 
             elif sig["signal"] == Signal.SELL:
                 if direction == "long":

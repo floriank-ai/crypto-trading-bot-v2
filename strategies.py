@@ -69,7 +69,14 @@ class MomentumStrategy:
         if trending:
             # Long: breakout new high + volume
             # Block if >2% above upper BB (overstretched, false-breakout risk)
-            if breakout and bullish and price_now <= bb_upper * 1.02:
+            # 09.10.2026: Breakout-LONG standardmäßig AUS. Forensik 1402
+            # Round-Trips: 310 Breakout-Longs, Ø-Bewegung -0.88% BRUTTO, also
+            # negativer Edge noch vor jeder Gebühr. Netto -228 EUR. Der
+            # Spiegel-Zweig (Breakdown-Short) hatte +2.12% über 665 Trades.
+            # Per MOMENTUM_ALLOW_BREAKOUT_LONG=1 wieder einschaltbar, z.B. wenn
+            # sich das Regime nachhaltig dreht.
+            if (breakout and bullish and price_now <= bb_upper * 1.02
+                    and Config.MOMENTUM_ALLOW_BREAKOUT_LONG):
                 signal = Signal.BUY
                 reasons = ["Breakout new high + volume spike"]
                 leverage = 3
@@ -79,7 +86,11 @@ class MomentumStrategy:
             # whipsaw-anfaelligste (lev=2, kein NEUTRAL-Bypass). Tieferes Extrem =
             # weniger, aber konvinktere Entries, die die 0.52% Round-Trip-Fee schaffen.
             # Only buy when price is still below/at the BB midpoint (really cheap)
-            elif current_rsi < 30 and bullish and macd_hist > 0 and price_now <= bb_middle:
+            # 09.10.2026: per Config gegatet. Dieser Zweig feuerte in 5 Monaten
+            # exakt 3x — statistisch irrelevant, aber explizit abgeschaltet statt
+            # als stiller Sonderfall mitzulaufen.
+            elif (current_rsi < 30 and bullish and macd_hist > 0
+                  and price_now <= bb_middle and Config.MOMENTUM_ALLOW_RSI_REVERSION):
                 signal = Signal.BUY
                 reasons = [f"RSI {current_rsi:.0f} extreme oversold + MACD pos"]
                 leverage = 2
@@ -95,7 +106,10 @@ class MomentumStrategy:
             # 24.06.2026: 68→70. Symmetrisch zum Long-Branch — nur tiefere Extreme
             # durch, weniger Whipsaw-Shorts die nur Fees kosten.
             # Only short when price is still above/at the BB midpoint
-            elif current_rsi > 70 and bearish and macd_hist < 0 and price_now >= bb_middle:
+            # 09.10.2026: ebenfalls gegatet, gleiche Begruendung wie der
+            # RSI-Long-Zweig. Getragen wird der Bot allein vom Breakdown-Short.
+            elif (current_rsi > 70 and bearish and macd_hist < 0
+                  and price_now >= bb_middle and Config.MOMENTUM_ALLOW_RSI_REVERSION):
                 signal = Signal.SELL
                 reasons = [f"RSI {current_rsi:.0f} extreme overbought + MACD neg"]
                 leverage = 2

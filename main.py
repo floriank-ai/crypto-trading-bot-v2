@@ -841,7 +841,17 @@ def run_bot():
                     d = pos.get("direction", "long")
                     pos_pnl = (cur - pos["entry_price"]) * pos["volume"] if d == "long" else (pos["entry_price"] - cur) * pos["volume"]
 
-                    if pos_pnl < 0:
+                    # 09.10.2026: HWM-Loser-Cut ist ein ERMESSENS-Exit (er schließt
+                    # wegen Portfolio-Drawdown, nicht wegen des eigenen Kursziels)
+                    # → Mindest-Haltedauer beachten. Sonst wird eine 2h alte
+                    # Position weggeschnitten, die statistisch erst ab 12h liefert,
+                    # und das kostet 1.20% Gebühr. Der SL der Position bleibt
+                    # unberührt und greift weiter jederzeit.
+                    if pos_pnl < 0 and not risk_mgr.discretionary_exit_allowed(sym):
+                        print(f"    [HWM] {sym} unter Mindest-Haltedauer "
+                              f"({risk_mgr.position_age_hours(sym):.1f}h < "
+                              f"{Config.MOMENTUM_MIN_HOLD_HOURS:.0f}h) — nicht geschnitten, SL bleibt aktiv")
+                    elif pos_pnl < 0:
                         # Verlierer: schliessen. SHORT braucht buy-to-cover.
                         close_side = "buy" if d == "short" else "sell"
                         res = exchange.place_order(sym, close_side, pos["volume"], direction=d)
@@ -993,6 +1003,11 @@ def run_bot():
                     pos = risk_mgr.open_positions[sym]
                     if pos.get("direction") != "short":
                         continue
+                    # 09.10.2026: Ermessens-Exit -> Mindest-Haltedauer beachten.
+                    # Dieser Zweig kappte Gewinner auf der einzig profitablen
+                    # Seite; vor 12h ist der Lauf statistisch noch nicht da.
+                    if not risk_mgr.discretionary_exit_allowed(sym):
+                        continue
                     ticker = exchange.get_ticker(sym)
                     if not ticker or not ticker.get("last"):
                         continue
@@ -1041,6 +1056,9 @@ def run_bot():
                         continue
                     if pos.get("strategy") in ("dca", "grid", "gainer"):
                         continue  # DCA/Grid/Gainer haben eigene Logik
+                    # 09.10.2026: Ermessens-Exit -> Mindest-Haltedauer beachten.
+                    if not risk_mgr.discretionary_exit_allowed(sym):
+                        continue
                     ticker = exchange.get_ticker(sym)
                     if not ticker or not ticker.get("last"):
                         continue
@@ -1128,7 +1146,18 @@ def run_bot():
                 if d == "short":
                     pnl_pct = -pnl_pct
 
-                if strat_name == "gainer":
+                # 09.10.2026: Harte Obergrenze der Haltedauer. Forensik
+                # Ø-Bewegung nach Haltedauer: 1-3d +3.21%, aber >3d nur +0.50%.
+                # Eine Position, die nach einer Woche noch offen ist, hat ihre
+                # These nicht erfüllt und blockiert nur Kapital. Das ist eine
+                # inhaltliche Aussage, daher bewusst OHNE Slot-Druck-Bedingung
+                # und ohne Mindest-Haltedauer-Gate (die ist hier eh überschritten).
+                if (strat_name not in ("dca", "grid", "gainer")
+                        and age_h >= Config.MOMENTUM_MAX_HOLD_DAYS * 24):
+                    ts_reason = "max_hold_exceeded"
+                    print(f"  [MaxHold] {sym} {d.upper()} {age_h/24:.1f}d offen "
+                          f"(> {Config.MOMENTUM_MAX_HOLD_DAYS:.0f}d), P&L {pnl_pct*100:+.2f}% → Close")
+                elif strat_name == "gainer":
                     # Gainer-Timeout: nach GAINER_MAX_HOLD_HOURS raus, WENN der Pump
                     # nicht mal die erste Partial-TP-Stufe (+2%) erreicht hat. Läuft
                     # er darüber, lassen wir Trailing/TP weiterarbeiten statt einen
@@ -1144,6 +1173,8 @@ def run_bot():
                 else:
                     if not _ts_slot_pressure:
                         continue  # kein Slot-Druck → Halten ist gratis, Exit kostet
+                    if not risk_mgr.discretionary_exit_allowed(sym):
+                        continue  # Mindest-Haltedauer noch nicht erreicht
                     if age_h < Config.POSITION_TIME_STOP_HOURS:
                         continue
                     if abs(pnl_pct) > ts_max_pnl:
@@ -1669,7 +1700,14 @@ def run_bot():
                     is_strong = best.get("leverage", 1) >= Config.ROTATION_MIN_LEVERAGE or coin_score >= 10
                     no_slots = len(risk_mgr.open_positions) >= risk_mgr.max_positions
                     low_cash = balance < 20  # only rotate if barely any cash left
-                    if is_strong and (no_slots or low_cash):
+                    # 09.10.2026: Rotation standardmäßig AUS (ROTATION_ENABLED).
+                    # Zwei Gründe aus der Forensik: sie hatte mit EV -0.85/Trade
+                    # die schlechteste Bilanz aller Exit-Mechanismen (96 Trades,
+                    # -81.74 EUR), UND sie zerstört per Definition die Haltedauer,
+                    # von der der Gewinn kommt (12h-3d +2.33% bis +3.21%, <1h nur
+                    # +0.16%). Eine Position rauszurotieren heißt, den Lauf
+                    # abzuschneiden und 1.20% Gebühr dafür zu zahlen.
+                    if Config.ROTATION_ENABLED and is_strong and (no_slots or low_cash):
                         weakest = risk_mgr.get_weakest_position(exchange)
                         # 08.10.2026: Rotation war der Mechanismus mit der SCHLECHTESTEN
                         # EV im ganzen Bot (Forensik 1402 Round-Trips: 96 Rotationen,
