@@ -1095,6 +1095,17 @@ def run_bot():
             # eigene Akkumulationslogik.
             ts_secs = Config.POSITION_TIME_STOP_HOURS * 3600
             ts_max_pnl = Config.POSITION_TIME_STOP_MAX_PNL_PCT / 100.0
+            # 09.10.2026: Slot-Druck-Gate. Siehe TIME_STOP_MIN_OPEN_POSITIONS in
+            # config.py — bei echten Gebühren ist jeder Flatline-Time-Stop ein
+            # garantierter Verlust (-0.70% bis -1.20% netto), und ohne Slot-Knappheit
+            # kauft man damit nichts. Der Gainer-Timeout ist davon NICHT betroffen:
+            # der schließt einen abgelaufenen Pump, das ist eine inhaltliche
+            # Aussage über die Position, keine Slot-Bewirtschaftung.
+            _ts_slot_pressure = len(risk_mgr.open_positions) >= Config.TIME_STOP_MIN_OPEN_POSITIONS
+            if not _ts_slot_pressure and risk_mgr.open_positions:
+                print(f"  [TimeStop] übersprungen: nur {len(risk_mgr.open_positions)} Position(en) offen "
+                      f"(< {Config.TIME_STOP_MIN_OPEN_POSITIONS}) — kein Slot-Druck, "
+                      f"Exit würde {(Config.TAKER_FEE_PCT+Config.MAKER_FEE_PCT)*100:.2f}% Gebühr für nichts kosten")
             for sym in list(risk_mgr.open_positions.keys()):
                 pos = risk_mgr.open_positions[sym]
                 strat_name = pos.get("strategy")
@@ -1131,6 +1142,8 @@ def run_bot():
                     print(f"  [GainerTimeout] {sym} {age_h:.1f}h offen, P&L {pnl_pct*100:+.2f}% "
                           f"(< erste TP-Stufe +{gainer_first_tp*100:.0f}%) → Pump vorbei, Close")
                 else:
+                    if not _ts_slot_pressure:
+                        continue  # kein Slot-Druck → Halten ist gratis, Exit kostet
                     if age_h < Config.POSITION_TIME_STOP_HOURS:
                         continue
                     if abs(pnl_pct) > ts_max_pnl:

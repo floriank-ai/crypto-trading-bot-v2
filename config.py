@@ -87,15 +87,28 @@ class Config:
     # --- Gebühren: maker vs. taker getrennt (09.10.2026) ---
     # Vorher war 0.0026 hart in exchange._paper_order verdrahtet, d.h. JEDE Order
     # zahlte den Taker-Satz und man konnte den Effekt von Limit-Orders nicht messen.
-    # WICHTIG / zu prüfen: Kraken hat die Pro-Gebühren zum 09.07.2026 umgebaut.
-    # Drittquellen nennen am Einstiegstier 0.40% maker / 0.80% taker, Krakens
-    # eigenes Beispiel bei 125k USD 30-Tage-Volumen 0.12% / 0.25%. Die Defaults
-    # hier behalten bewusst den bisherigen Taker-Wert (0.26%), damit die
-    # Papier-Ergebnisse mit der Historie vergleichbar bleiben — sie sind NICHT
-    # als bestätigte Kraken-Sätze zu lesen. Echten Satz im Kraken-Konto prüfen
-    # und hier per Env setzen, sonst sind alle Netto-Zahlen zu optimistisch.
-    TAKER_FEE_PCT = float(os.getenv("TAKER_FEE_PCT", 0.0026))
-    MAKER_FEE_PCT = float(os.getenv("MAKER_FEE_PCT", 0.0016))
+    # 09.10.2026: auf die ECHTEN Kraken-Sätze gesetzt (vorher 0.0026/0.0016, was
+    # dem alten Tier vor dem Umbau entsprach und die Papier-Ergebnisse massiv
+    # beschönigte).
+    # Quelle: kraken.com Gebührenseite, Spot-Tabelle, abgerufen 09.10.2026.
+    # Kraken hat die Pro-Gebühren zum 09.07.2026 umgebaut und den Einstiegstier
+    # von 0.25%/0.40% auf 0.40%/0.80% VERDOPPELT. Tier-Leiter (Spot):
+    #   Tier  1  > 0 $            maker 0.40%  taker 0.80%   <- hier stehen wir
+    #   Tier  2  > 2.500 $        maker 0.30%  taker 0.60%
+    #   Tier  3  > 10.000 $       maker 0.22%  taker 0.38%   (oder 20k Assets)
+    #   Tier  4  > 25.000 $       maker 0.20%  taker 0.35%
+    #   Tier  5  > 50.000 $       maker 0.15%  taker 0.30%
+    #   Tier  6  > 100.000 $      maker 0.12%  taker 0.25%
+    #   Tier 12  > 10.000.000 $   maker 0.00%  taker 0.10%
+    # Der Tier richtet sich nach dem BESTEN aus Spot-Volumen, Futures-Volumen
+    # oder Assets-on-Platform. Der öffentliche API-Endpunkt AssetPairs liefert
+    # die Tabelle seit dem Umbau NICHT mehr (fees/fees_maker sind leere Arrays),
+    # der kontospezifische Satz ist also nur im Konto oder per authentifizierter
+    # API ablesbar — und es sind keine echten Kraken-Keys hinterlegt.
+    # Wer einen besseren Tier hat, setzt ihn per Env (z.B. Tier 3):
+    #   railway variables --set TAKER_FEE_PCT=0.0038 --set MAKER_FEE_PCT=0.0022
+    TAKER_FEE_PCT = float(os.getenv("TAKER_FEE_PCT", 0.0080))
+    MAKER_FEE_PCT = float(os.getenv("MAKER_FEE_PCT", 0.0040))
     # Limit-Orders (maker) nur für PREISZIEL-Exits: take_profit und partial_tp.
     # Die kennen ihr Ziel im Voraus und können im Orderbuch liegen. Stop-Loss,
     # Time-Stop, Rotation, HWM und alle Entries bleiben Market (taker) — die
@@ -195,6 +208,17 @@ class Config:
     # (±0.5%) werden geflusht; eine die noch +0.7% laeuft darf Richtung TP weiter,
     # statt mit Fee-Verlust geschlossen zu werden.
     POSITION_TIME_STOP_MAX_PNL_PCT = float(os.getenv("POSITION_TIME_STOP_MAX_PNL_PCT", 0.5))
+    # 09.10.2026: Der Time-Stop feuert nur noch bei echtem SLOT-DRUCK.
+    # Rechnung mit den ECHTEN Kraken-Gebühren (Tier 1, Round-Trip 1.20-1.60%):
+    # eine Position innerhalb ±0.5% zu schließen realisiert netto -0.70% bis
+    # -1.20%. Jede Auslösung ist also ein GARANTIERTER Verlust. In der Forensik
+    # feuerte time_stop_flatlined 330x — bei echten Gebühren ~-330 EUR reiner
+    # Selbstschaden.
+    # Sinn des Time-Stops ist, einen Slot von einer toten Position zu befreien.
+    # Ist der Slot gar nicht knapp (typisch: 2 von 12 belegt), ist Halten gratis
+    # und der Exit kostet 1.2% für nichts. Darum: erst ab dieser Anzahl offener
+    # Positionen überhaupt time-stoppen. Auf 0 setzen = altes Verhalten.
+    TIME_STOP_MIN_OPEN_POSITIONS = int(os.getenv("TIME_STOP_MIN_OPEN_POSITIONS", 5))
 
     # Win-Cooldown: nach profitablem Exit X Stunden Pause fuer dasselbe Symbol.
     # ORCA 27.04.: Win +7.02, dann 2.5h spaeter Re-Entry → SL -4.98. Erstes Setup
