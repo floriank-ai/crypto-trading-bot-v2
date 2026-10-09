@@ -143,7 +143,7 @@ class Notifier:
                   f"Signal: _{reason}_\n"
                   f"Cash: `{balance:.2f}EUR`\n"
                   f"Portfolio: `{portfolio:.2f}EUR`\n"
-                  f"Rücksetzer vom Hoch: `{daily_pnl:+.2f}%`")
+                  f"vom Hoch: `{daily_pnl:+.2f}%`")
 
     def notify_exit(self, symbol: str, exit_type: str, pnl: float, strategy: str,
                     portfolio: float = 0, daily_pnl: float = 0):
@@ -152,4 +152,4 @@ class Notifier:
         self.send(f"{icon} {label} *{symbol}*\n"
                   f"P&L: `{pnl:+.2f}EUR` _{strategy}_\n"
                   f"Portfolio: `{portfolio:.2f}EUR`\n"
-                  f"Rücksetzer vom Hoch: `{daily_pnl:+.2f}%`")
+                  f"vom Hoch: `{daily_pnl:+.2f}%`")

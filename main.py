@@ -394,27 +394,78 @@ def run_bot():
 
     # /status Telegram-Command
     def send_status():
+        """Telegram /status — kompaktes, ruhiges Layout.
+
+        09.10.2026 neu designt. Vorher: neun verschiedene Emoji
+        (📊💰📈🎯📂🚀💥🟢🔴) und unausgerichtete Werte.
+        Jetzt:
+          - Zahlen in Monospace-Blöcken → echte Spaltenausrichtung. Telegram
+            strippt Markdown INNERHALB von ```-Blöcken, darum stehen die
+            Abschnitts-Titel außerhalb.
+          - Genau ZWEI Akzent-Glyphen: ▲ / ▼ für Vorzeichen. Keine Deko-Emoji.
+          - Zeilen bleiben unter ~30 Zeichen, sonst bricht Telegram auf dem
+            Handy mitten in der Tabelle um und die Ausrichtung ist zerstört.
+          - Kurze Label (User-Wunsch): Heute / vom Hoch / Boden.
+        """
         port = risk_mgr.get_portfolio_value(exchange)
         bal  = exchange.get_balance()
         pnl  = risk_mgr.get_daily_pnl_pct(exchange)
+        cap  = risk_mgr.get_capital_pnl_pct(exchange)
         pos  = risk_mgr.open_positions
-        lines = [f"📊 *Portfolio Status*\n",
-                 f"💰 Cash: `{bal:.2f}EUR`",
-                 f"📈 Portfolio: `{port:.2f}EUR`",
-                 f"🎯 Rücksetzer vom Hoch: `{pnl:+.2f}%`",
-                 f"📂 Offene Positionen: {len(pos)}"]
-        for sym, p in pos.items():
-            ticker = exchange.get_ticker(sym)
-            cur = ticker.get("last", 0) if ticker else 0
-            d = p.get("direction", "long")
-            unreal = (cur - p["entry_price"]) * p["volume"] if d == "long" else (p["entry_price"] - cur) * p["volume"]
-            if p.get("strategy") == "gainer":
-                icon = "🚀" if unreal >= 0 else "💥"
-                lines.append(f"  {icon} *{sym}* [GAINER]: `{unreal:+.2f}EUR`")
-            else:
-                icon = "🟢" if unreal >= 0 else "🔴"
-                lines.append(f"  {icon} {sym} [{d.upper()}]: `{unreal:+.2f}EUR`")
-        notifier.send("\n".join(lines))
+        phase = risk_mgr.get_trading_phase(exchange)
+
+        def arrow(v):
+            return "▲" if v >= 0 else "▼"
+
+        def row(label, value, unit, mark=None):
+            # Label links, Wert rechtsbündig → Spalten stehen untereinander.
+            s = f"{label:<11}{value:>9} {unit}"
+            return f"{s} {mark}" if mark else s
+
+        out = [f"*PORTFOLIO* · {phase.upper()}", "```"]
+        out.append(row("Wert", f"{port:.2f}", "EUR"))
+        out.append(row("Cash", f"{bal:.2f}", "EUR"))
+        out.append("")
+        ds = daily_summary.day_start_value()
+        if ds and ds > 0:
+            today = (port - ds) / ds * 100
+            out.append(row("Heute", f"{today:+.2f}", "%", arrow(today)))
+        out.append(row("vom Hoch", f"{pnl:+.2f}", "%", arrow(pnl)))
+        out.append(row("Boden", f"{cap:+.2f}", "%", arrow(cap)))
+        out.append("```")
+
+        if pos:
+            out.append(f"*POSITIONEN · {len(pos)}*")
+            out.append("```")
+            for sym, p in pos.items():
+                ticker = exchange.get_ticker(sym)
+                cur = ticker.get("last", 0) if ticker else 0
+                d = p.get("direction", "long")
+                entry = p["entry_price"]
+                if d == "long":
+                    unreal = (cur - entry) * p["volume"]
+                    pct = (cur - entry) / entry * 100 if entry else 0
+                else:
+                    unreal = (entry - cur) * p["volume"]
+                    pct = (entry - cur) / entry * 100 if entry else 0
+                out.append(f"{arrow(unreal)} {sym:<11}{d.upper():<6}{p.get('strategy','')}")
+                out.append(f"   {unreal:+.2f} EUR{pct:>+9.2f} %")
+            out.append("```")
+        else:
+            out.append("_keine offenen Positionen_")
+
+        s = logger.get_summary()
+        if s["total_trades"] > 0:
+            # Bewusst als Block statt einer langen Kopfzeile: die Variante
+            # "*SESSION* · N Trades · X EUR · Y Fees" war 45 Zeichen breit und
+            # brach auf dem Handy um.
+            out.append(f"*SESSION · {s['total_trades']} Trades*")
+            out.append("```")
+            out.append(row("Realisiert", f"{s['realized_pnl']:+.2f}", "EUR"))
+            out.append(row("Fees", f"{s['total_fees_eur']:.2f}", "EUR"))
+            out.append("```")
+
+        notifier.send("\n".join(out))
     notifier.set_status_callback(send_status)
 
     # Cooldown/Churn-State fruh initialisieren (damit do_reset() sie clearen kann)
@@ -698,13 +749,12 @@ def run_bot():
             _day_start = daily_summary.day_start_value()
             if _day_start and _day_start > 0:
                 _today_pct = (portfolio_val - _day_start) / _day_start * 100
-                _today_txt = f"Heute: {_today_pct:+.2f}% (ab {_day_start:.2f})"
+                _today_txt = f"Heute {_today_pct:+.2f}%"
             else:
-                _today_txt = "Heute: n/a"
+                _today_txt = "Heute n/a"
             print(f"  Cash: {balance:.2f}EUR | Portfolio: {portfolio_val:.2f}EUR | "
-                  f"{_today_txt} | "
-                  f"Rücksetzer: {daily_pnl:+.2f}% (Anker {risk_mgr.daily_start_value:.2f}) | "
-                  f"über Boden: {cap_pnl:+.2f}% (Boden {risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
+                  f"{_today_txt} | vom Hoch {daily_pnl:+.2f}% | "
+                  f"Boden {cap_pnl:+.2f}% ({risk_mgr.capital_floor:.2f}) [{phase.upper()}]")
 
             # 11.06.2026 (Option B) / 15.06.2026 (Zwei-Stufen-Fix): KAPITAL-Schutz.
             # Stufe 1 — SOFT (portfolio < capital_floor, aber >= hard_stop_floor):
@@ -1146,10 +1196,10 @@ def run_bot():
                             allow_short_entries = True
                             print(f"  [PROTECT-Escape] BTC 15m {chg_p*100:+.2f}% < -0.1% → Shorts erlaubt (Recovery-Mode)")
                 if allow_short_entries:
-                    print(f"  [PROTECT] Rücksetzer {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
+                    print(f"  [PROTECT] vom Hoch {daily_pnl:+.2f}% — Longs blockiert, Shorts erlaubt (Markt {regime_state})")
                     allow_long_entries = False
                 else:
-                    print(f"  [PROTECT] Rücksetzer {daily_pnl:+.2f}% — keine neuen Trades (Markt {regime_state}), Trailing-SL aktiv")
+                    print(f"  [PROTECT] vom Hoch {daily_pnl:+.2f}% — keine neuen Trades (Markt {regime_state}), Trailing-SL aktiv")
                     print(f"\n  Next scan in {Config.CHECK_INTERVAL}s...")
                     time.sleep(Config.CHECK_INTERVAL)
                     continue
@@ -1704,7 +1754,7 @@ def run_bot():
                 print(f"\n  Total trades: {summary['total_trades']} | "
                       f"Realisiert: {summary['realized_pnl']:+.2f}EUR | "
                       f"Fees: {summary['total_fees_eur']:.4f}EUR | "
-                      f"Rücksetzer: {daily_pnl:+.2f}%")
+                      f"vom Hoch: {daily_pnl:+.2f}%")
 
             if risk_mgr.open_positions:
                 print(f"\n  Open positions ({len(risk_mgr.open_positions)}):")
