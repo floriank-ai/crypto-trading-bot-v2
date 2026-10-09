@@ -139,7 +139,7 @@ def execute_trade(exchange, risk_manager, logger, notifier, symbol, side, analys
         if result["status"] == "ok":
             exec_price = result.get("price", price)
             cost = result.get("cost", volume * exec_price)
-            fee = result.get("fee", cost * 0.0026)
+            fee = result.get("fee", cost * Config.TAKER_FEE_PCT)
 
             risk_manager.open_position(
                 symbol, exec_price, volume, strategy, direction,
@@ -269,15 +269,23 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
             vol_close, stage_idx = partial
             direction = pos.get("direction", "long")
             close_side = "buy" if direction == "short" else "sell"
-            trigger_pct = risk_manager.PARTIAL_TP_STAGES[stage_idx][0] * 100
-            print(f"  >> PARTIAL-TP stage {stage_idx+1} ({trigger_pct:.1f}%) {symbol} [{direction}]: sell {vol_close:.8f}")
-            res = exchange.place_order(symbol, close_side, vol_close, direction=direction)
+            # 09.10.2026: Gainer haben eigene Stufen — vorher wurde hier immer die
+            # normale Tabelle gelesen und damit der falsche Trigger geloggt.
+            _stages = (risk_manager.GAINER_PARTIAL_TP_STAGES
+                       if pos.get("strategy") == "gainer" else risk_manager.PARTIAL_TP_STAGES)
+            trigger_pct = _stages[stage_idx][0] * 100
+            # Preisziel-Exit → als Limit (maker) abrechnen. Das Ziel ist im Voraus
+            # bekannt, die Order kann im Orderbuch liegen.
+            _otype = "limit" if Config.USE_LIMIT_EXITS else "market"
+            print(f"  >> PARTIAL-TP stage {stage_idx+1} ({trigger_pct:.1f}%) {symbol} [{direction}]: sell {vol_close:.8f} [{_otype}]")
+            res = exchange.place_order(symbol, close_side, vol_close, direction=direction,
+                                       order_type=_otype)
             if res["status"] != "ok":
                 print(f"    [PARTIAL-TP] EXEC FAILED {symbol}: {res.get('error', '?')}")
             if res["status"] == "ok":
                 cp = res.get("price", current_price)
                 cost = res.get("cost", vol_close * cp)
-                fee = res.get("fee", cost * 0.0026)
+                fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                 if direction == "short":
                     pnl = (pos["entry_price"] - cp) * vol_close - 2 * fee
                     log_side = "cover"
@@ -288,7 +296,8 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
                                  price=cp, cost=cost, fee=fee,
                                  mode=Config.TRADING_MODE, strategy=pos["strategy"],
                                  signal_reason=f"partial_tp_{stage_idx+1}",
-                                 balance_after=exchange.get_balance(), realized_pnl=pnl)
+                                 balance_after=exchange.get_balance(), realized_pnl=pnl,
+                                 fee_type=res.get("fee_type"), fee_rate=res.get("fee_rate"))
                 risk_manager.record_partial_tp(symbol, stage_idx, vol_close)
                 port_val = risk_manager.get_portfolio_value(exchange)
                 d_pnl = risk_manager.get_daily_pnl_pct(exchange)
@@ -306,14 +315,21 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
             print(f"  >> {exit_type.upper()} triggered: {symbol} [{direction}]")
 
             close_side = "buy" if direction == "short" else "sell"
-            result = exchange.place_order(symbol, close_side, pos["volume"], direction=direction)
+            # 09.10.2026: NUR take_profit als Limit (maker) — das Ziel ist im
+            # Voraus bekannt, die Order kann im Orderbuch liegen. stop_loss und
+            # alles andere bleibt Market: ein Stop MUSS sofort ausführen, eine
+            # ruhende Limit-Order würde in einer schnellen Bewegung nicht gefüllt
+            # und der Verlust liefe weiter.
+            _otype = "limit" if (Config.USE_LIMIT_EXITS and exit_type == "take_profit") else "market"
+            result = exchange.place_order(symbol, close_side, pos["volume"],
+                                          direction=direction, order_type=_otype)
 
             if result["status"] != "ok":
                 print(f"    [{exit_type.upper()}] EXEC FAILED {symbol}: {result.get('error', '?')}")
             if result["status"] == "ok":
                 close_price = result.get("price", current_price)
                 cost = result.get("cost", pos["volume"] * close_price)
-                fee = result.get("fee", cost * 0.0026)
+                fee = result.get("fee", cost * Config.TAKER_FEE_PCT)
 
                 if direction == "short":
                     pnl = (pos["entry_price"] - close_price) * pos["volume"] - 2 * fee
@@ -327,7 +343,8 @@ def check_exits(exchange, risk_manager, logger, notifier, last_sl_time=None, las
                                  mode=Config.TRADING_MODE, strategy=pos["strategy"],
                                  signal_reason=exit_type,
                                  balance_after=exchange.get_balance(),
-                                 realized_pnl=pnl)
+                                 realized_pnl=pnl,
+                                 fee_type=result.get("fee_type"), fee_rate=result.get("fee_rate"))
                 risk_manager.close_position(symbol)  # erst schließen, dann Portfolio berechnen
                 port_val = risk_manager.get_portfolio_value(exchange)
                 d_pnl = risk_manager.get_daily_pnl_pct(exchange)
@@ -449,7 +466,7 @@ def run_bot():
                     continue
                 cp = res.get("price", ticker["last"])
                 cost = res.get("cost", pos["volume"] * cp)
-                fee = res.get("fee", cost * 0.0026)
+                fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                 if direction == "short":
                     pnl = (pos["entry_price"] - cp) * pos["volume"] - 2 * fee
                     log_side = "cover"
@@ -494,7 +511,7 @@ def run_bot():
             if res["status"] == "ok":
                 cp = res.get("price", pos["entry_price"])
                 cost = res.get("cost", pos["volume"] * cp)
-                fee = res.get("fee", cost * 0.0026)
+                fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                 pnl = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
                 logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
                                  price=cp, cost=cost, fee=fee,
@@ -763,7 +780,7 @@ def run_bot():
                         if res["status"] == "ok":
                             p = res.get("price", pos["entry_price"])
                             c = res.get("cost", pos["volume"] * p)
-                            f = res.get("fee", c * 0.0026)
+                            f = res.get("fee", c * Config.TAKER_FEE_PCT)
                             logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
                                              price=p, cost=c, fee=f,
                                              mode=Config.TRADING_MODE, strategy=pos["strategy"],
@@ -929,7 +946,7 @@ def run_bot():
                         if res["status"] == "ok":
                             cp = res.get("price", cur)
                             cost = res.get("cost", pos["volume"] * cp)
-                            fee = res.get("fee", cost * 0.0026)
+                            fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                             pnl = (pos["entry_price"] - cp) * pos["volume"] - 2 * fee
                             logger.log_trade(pair=sym, side="cover", volume=pos["volume"],
                                              price=cp, cost=cost, fee=fee,
@@ -973,7 +990,7 @@ def run_bot():
                         if res["status"] == "ok":
                             cp = res.get("price", cur)
                             cost = res.get("cost", pos["volume"] * cp)
-                            fee = res.get("fee", cost * 0.0026)
+                            fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                             pnl = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
                             logger.log_trade(pair=sym, side="sell", volume=pos["volume"],
                                              price=cp, cost=cost, fee=fee,
@@ -1059,7 +1076,7 @@ def run_bot():
                 if res["status"] == "ok":
                     cp = res.get("price", cur)
                     cost = res.get("cost", pos["volume"] * cp)
-                    fee = res.get("fee", cost * 0.0026)
+                    fee = res.get("fee", cost * Config.TAKER_FEE_PCT)
                     if d == "long":
                         pnl_eur = (cp - pos["entry_price"]) * pos["volume"] - 2 * fee
                     else:
@@ -1619,7 +1636,7 @@ def run_bot():
                             if rot_result["status"] == "ok":
                                 rot_price = rot_result.get("price", 0)
                                 rot_cost = rot_result.get("cost", weak_pos["volume"] * rot_price)
-                                rot_fee = rot_result.get("fee", rot_cost * 0.0026)
+                                rot_fee = rot_result.get("fee", rot_cost * Config.TAKER_FEE_PCT)
                                 # Vorzeichen richtungsabhängig — vorher wurde für
                                 # Shorts das falsche Vorzeichen geloggt/gemeldet.
                                 if rot_dir == "short":

@@ -203,12 +203,24 @@ class Exchange:
         return limits.get("min", 0.0001)
 
     def place_order(self, symbol: str, side: str, volume: float,
-                    price: float = None, direction: str = "long") -> dict:
-        """Place a market order."""
+                    price: float = None, direction: str = "long",
+                    order_type: str = "market") -> dict:
+        """Place an order. order_type "market" (taker) or "limit" (maker).
+
+        09.10.2026: order_type durchgereicht, damit Preisziel-Exits als Maker
+        abgerechnet werden. ACHTUNG — nur im PAPER-Modus umgesetzt. Im Live-Modus
+        bleibt es bewusst eine Market-Order: eine echte Limit-Order kann
+        unausgeführt im Buch liegen bleiben, und dafür fehlt hier jede
+        Verwaltung (Nachverfolgen, Timeout, Nachziehen). Lieber ehrliche
+        Taker-Gebühr als eine stillschweigend offene Order.
+        """
         if Config.is_paper_mode():
-            return self._paper_order(symbol, side, volume, direction)
+            return self._paper_order(symbol, side, volume, direction, order_type)
 
         try:
+            if order_type == "limit":
+                print(f"  [Order] {symbol}: Limit-Exits sind im Live-Modus nicht "
+                      f"implementiert → Market-Order (Taker-Gebühr)")
             order = self.exchange.create_market_order(symbol, side, volume)
             return {
                 "status": "ok",
@@ -222,8 +234,15 @@ class Exchange:
             return {"status": "error", "error": str(e)}
 
     def _paper_order(self, symbol: str, side: str, volume: float,
-                     direction: str = "long") -> dict:
-        """Simulate order in paper mode. Supports long and short."""
+                     direction: str = "long", order_type: str = "market") -> dict:
+        """Simulate order in paper mode. Supports long and short.
+
+        order_type: "market" → Taker-Gebühr, "limit" → Maker-Gebühr.
+        09.10.2026: vorher war 0.0026 hart verdrahtet, jede Order zahlte Taker.
+        Damit war der Effekt von Limit-Orders nicht messbar. Limit wird nur für
+        Preisziel-Exits (take_profit, partial_tp) genutzt — die können im
+        Orderbuch liegen. Siehe Config.USE_LIMIT_EXITS.
+        """
         ticker = self.get_ticker(symbol)
         if not ticker or not ticker.get("last"):
             return {"status": "error", "error": "No price data"}
@@ -233,7 +252,9 @@ class Exchange:
             exec_price = ticker["last"]
 
         cost = volume * exec_price
-        fee = cost * 0.0026
+        is_maker = (order_type == "limit")
+        fee_rate = Config.MAKER_FEE_PCT if is_maker else Config.TAKER_FEE_PCT
+        fee = cost * fee_rate
 
         if direction == "short":
             # Short öffnen: Margin reservieren (cost), Gewinn wenn Preis fällt
@@ -285,4 +306,8 @@ class Exchange:
             "price": exec_price,
             "cost": cost,
             "fee": fee,
+            # Mitgeben, damit der Trade-Logger messen kann, wie viel Gebühr auf
+            # maker- bzw. taker-Orders entfällt.
+            "fee_type": "maker" if is_maker else "taker",
+            "fee_rate": fee_rate,
         }

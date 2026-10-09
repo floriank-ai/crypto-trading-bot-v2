@@ -40,7 +40,8 @@ class TradeLogger:
     def log_trade(self, pair: str, side: str, volume: float, price: float,
                   cost: float, fee: float, mode: str, strategy: str = "",
                   signal_reason: str = "", balance_after: float = 0,
-                  realized_pnl: float = None):
+                  realized_pnl: float = None, fee_type: str = None,
+                  fee_rate: float = None):
         timestamp = datetime.now().isoformat()
         total = cost + fee if side == "buy" else cost - fee
 
@@ -61,6 +62,15 @@ class TradeLogger:
         }
         if realized_pnl is not None:
             trade["realized_pnl"] = round(realized_pnl, 4)
+        # 09.10.2026: maker/taker mitschreiben, damit der Effekt der Limit-Exits
+        # messbar ist. Bewusst NUR ins JSON — die CSV hat ein festes Schema mit
+        # 12 Spalten und eine 13. wuerde alte und neue Zeilen inkonsistent machen
+        # (csv.DictReader wirft den Extra-Wert in restkey). Der Typ ist zur Not
+        # auch aus signal_reason ableitbar (take_profit/partial_tp = maker).
+        if fee_type is not None:
+            trade["fee_type"] = fee_type
+        if fee_rate is not None:
+            trade["fee_rate"] = fee_rate
 
         trades = []
         if os.path.exists(self.json_path):

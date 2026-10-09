@@ -84,6 +84,28 @@ class Config:
     ROTATION_MIN_LOSS_PCT = float(os.getenv("ROTATION_MIN_LOSS_PCT", -1.5))
     DAILY_TARGET_PCT = float(os.getenv("DAILY_TARGET_PCT", 5.0))  # Tages-Ziel in %
 
+    # --- Gebühren: maker vs. taker getrennt (09.10.2026) ---
+    # Vorher war 0.0026 hart in exchange._paper_order verdrahtet, d.h. JEDE Order
+    # zahlte den Taker-Satz und man konnte den Effekt von Limit-Orders nicht messen.
+    # WICHTIG / zu prüfen: Kraken hat die Pro-Gebühren zum 09.07.2026 umgebaut.
+    # Drittquellen nennen am Einstiegstier 0.40% maker / 0.80% taker, Krakens
+    # eigenes Beispiel bei 125k USD 30-Tage-Volumen 0.12% / 0.25%. Die Defaults
+    # hier behalten bewusst den bisherigen Taker-Wert (0.26%), damit die
+    # Papier-Ergebnisse mit der Historie vergleichbar bleiben — sie sind NICHT
+    # als bestätigte Kraken-Sätze zu lesen. Echten Satz im Kraken-Konto prüfen
+    # und hier per Env setzen, sonst sind alle Netto-Zahlen zu optimistisch.
+    TAKER_FEE_PCT = float(os.getenv("TAKER_FEE_PCT", 0.0026))
+    MAKER_FEE_PCT = float(os.getenv("MAKER_FEE_PCT", 0.0016))
+    # Limit-Orders (maker) nur für PREISZIEL-Exits: take_profit und partial_tp.
+    # Die kennen ihr Ziel im Voraus und können im Orderbuch liegen. Stop-Loss,
+    # Time-Stop, Rotation, HWM und alle Entries bleiben Market (taker) — die
+    # brauchen sofortige Ausführung bzw. jagen eine Bewegung.
+    # Erwarteter Effekt laut Forensik: TP+Partials sind nur 4.9% der Gebühren
+    # (21.74 von 442.66 EUR) → Ersparnis ~10 EUR auf 1402 Round-Trips. Klein,
+    # aber ohne Fill-Risiko. Der große Posten sind die Entries (66.4%), und die
+    # als Limit zu fahren würde die Strategie verändern, nicht nur verbilligen.
+    USE_LIMIT_EXITS = os.getenv("USE_LIMIT_EXITS", "1") == "1"
+
     # Strategies
     # 28.04.2026: grid dazu — Audit zeigte 75% NEUTRAL-Cycles, Grid ist regime-exempt
     # und confirmt zusätzlich Sentiment-LONG. Mehr Signal-Quellen = mehr 2-3%/Tag-Chancen.
