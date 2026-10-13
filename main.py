@@ -545,6 +545,27 @@ def run_bot():
     risk_mgr.daily_start_value = actual_portfolio
     print(f"  [Restore] Tages-Startpunkt: {actual_portfolio:.2f}EUR")
 
+    # 13.10.2026 (FIX): Kapital-Boden am Istwert ausrichten, nicht an
+    # INITIAL_CAPITAL. risk_manager.__init__ setzt capital_floor = 1000. Steht
+    # das Portfolio beim Neustart darunter (z.B. 979), ist der Bot SOFORT unter
+    # dem Boden -> VERLUSTBREMSE -> nur Shorts. Live beobachtet direkt nach dem
+    # Deploy der validierten Konfiguration: "Boden -2.06% (1000.00) [PROTECT]"
+    # haette genau die Longs ausgesperrt, die der Backtest als die profitable
+    # Richtung ausgewiesen hat. Der Boden ist also nicht nur kosmetisch falsch,
+    # er blockiert die Strategie.
+    # Der Boden ist ein HOCHWASSERSTAND, kein Wunschwert: er darf nie ueber dem
+    # liegen, was tatsaechlich da ist. Die Ratsche (max(floor, floor_min,
+    # peak*(1-TRAIL_BAND)) in der Hauptschleife) zieht ihn mit echtem Wachstum
+    # wieder hoch; die untere Schranke bleibt durch CAPITAL_FLOOR_REBASE_MIN_FRAC
+    # begrenzt, damit er nicht beliebig durchrutscht.
+    _floor_start = max(min(Config.INITIAL_CAPITAL, actual_portfolio),
+                       Config.INITIAL_CAPITAL * Config.CAPITAL_FLOOR_REBASE_MIN_FRAC)
+    if _floor_start < risk_mgr.capital_floor:
+        print(f"  [Restore] Kapital-Boden {risk_mgr.capital_floor:.2f} → {_floor_start:.2f}EUR "
+              f"(am Istwert ausgerichtet, verhindert falschen PROTECT-Start)")
+        risk_mgr.capital_floor = _floor_start
+        risk_mgr.capital_floor_min = _floor_start
+
     logger.log_session_start(actual_portfolio)
 
     # Altlasten schließen: Positionen von Strategien die nicht mehr aktiv sind
