@@ -61,10 +61,24 @@ class Config:
 
     # Risk (aggressive)
     MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", 0.25))
-    STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.04))
+    # ── 10.10.2026: VALIDIERTE KONFIGURATION (Trendfolge statt Scalping) ──
+    # Backtest 6 Monate, 16 echte Coins, ECHTE Kraken-Gebuehren, 1h-Kerzen:
+    #   1h LONG  SL10% TP30%  -> 242 Trades, O +1.009% netto, WR 43.0%
+    # Kontrollgruppe (gleiche Anzahl+Richtung, ZUFAELLIGE Einstiegszeitpunkte):
+    #   dieselbe Konfiguration -> O -0.574%   => Vorteil +1.58 Prozentpunkte
+    # Der Vorteil gilt ueber benachbarte Parameter (SL 4/6/10%, TP 15/30% alle
+    # +0.9 bis +1.8pp), haengt also nicht an einer Glueckszelle.
+    # VORBEHALT: ueber ALLE 75 getesteten Paare schlaegt das Signal den Zufall
+    # nur in 30, Median-Vorteil -0.22%. Der Edge ist konfigurationsspezifisch,
+    # nicht breit. 6 Monate sind ein Zeitraum, kein Beweis.
+    # Warum so weit: die Gebuehr ist FIX (1.20-1.60% Round-Trip), die Bewegung
+    # skaliert mit dem Zeitrahmen. Dasselbe Signal auf 15m hatte bei Gebuehren=0
+    # eine Erwartung von -0.024% (0 von 240 Varianten profitabel). Enge Ziele
+    # koennen die Fixkosten nicht verdienen, weite koennen es.
+    STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.10))
     # TP bewusst nah dran — Partial-TP (2.5%/5%) + Trailing sollen vorher greifen.
     # Hart-Cap als Sicherheitsnetz, falls Preis durchschießt.
-    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.08))
+    TAKE_PROFIT_PCT = float(os.getenv("TAKE_PROFIT_PCT", 0.30))
     # Globaler Cap eher großzügig — echte Risikosteuerung macht der Korrelations-Cap
     # (max 3 LONG + 3 SHORT in risk_manager.py). Zusätzlich Gainer-Slot + DCA/Grid.
     MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", 12))
@@ -144,7 +158,7 @@ class Config:
     #
     # Nur das Breakdown-Short-Setup handeln. Der Breakout-Long hatte über 310
     # Trades einen negativen BRUTTO-Edge (-0.88%/Trade) — er ist nicht zu retten.
-    MOMENTUM_ALLOW_BREAKOUT_LONG = os.getenv("MOMENTUM_ALLOW_BREAKOUT_LONG", "0") == "1"
+    MOMENTUM_ALLOW_BREAKOUT_LONG = os.getenv("MOMENTUM_ALLOW_BREAKOUT_LONG", "1") == "1"
     # RSI-Mean-Reversion feuerte in 5 Monaten exakt 3x — irrelevant, aber explizit aus.
     MOMENTUM_ALLOW_RSI_REVERSION = os.getenv("MOMENTUM_ALLOW_RSI_REVERSION", "0") == "1"
     # Mindest-Haltedauer, bevor ein ERMESSENS-Exit greifen darf (Time-Stop,
@@ -229,8 +243,15 @@ class Config:
     # Exposure-check: 2 STRONG * 400 + 5 NORMAL * 200 = 1800 — Cash-Reserve 250
     # und MAX_OPEN_POSITIONS limitieren in der Praxis.
     POSITION_SIZE_MIN_EUR = float(os.getenv("POSITION_SIZE_MIN_EUR", 50))    # Cash-Reserve-Modus
-    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 200))  # Default
-    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 400))  # Sehr gutes Signal
+    # 10.10.2026: 200/400 -> 120/240. Begruendung ist Risiko, nicht Ertrag:
+    # der Stop-Loss ist mit der validierten Konfiguration von 4% auf 10% verbreitert.
+    # Der Backtest hielt dabei immer nur EINE Position pro Symbol — der Live-Bot
+    # haelt bis zu 8 gleichzeitig (3 long + 5 short). Bei 200 EUR waeren das im
+    # Extremfall 8 * 200 * 10% = -160 EUR = -16% des Kontos auf einen Schlag.
+    # Mit 120 EUR: 8 * 120 * 10% = -96 EUR = ~-10%. Bewusst die Groesse gesenkt
+    # und nicht die Slot-Zahl, damit die Trade-Frequenz erhalten bleibt.
+    POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 120))
+    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 240))
     # Hard-Reserve fuer Gainer-Strategie (2 Slots * 100 EUR = 200) + 50 EUR Puffer.
     # Wenn Cash darunter → nur Min-Sizing (50 EUR), damit Gainer immer schlagen kann.
     MIN_CASH_RESERVE_EUR = float(os.getenv("MIN_CASH_RESERVE_EUR", 250))
@@ -398,6 +419,18 @@ class Config:
     RSI_OVERBOUGHT = int(os.getenv("RSI_OVERBOUGHT", 65))
     EMA_FAST = int(os.getenv("EMA_FAST", 9))
     EMA_SLOW = int(os.getenv("EMA_SLOW", 21))
+
+    # 10.10.2026: Strategie-Zeitrahmen. War hart "15m" in main.py verdrahtet.
+    # Auf 15m ist das Signal nachweislich wertlos (Erwartung -0.024% selbst bei
+    # Gebuehren=0). Auf 1h schlaegt es den Zufall um +1.58pp pro Trade.
+    STRATEGY_TIMEFRAME = os.getenv("STRATEGY_TIMEFRAME", "1h")
+    # Trailing-Stop fuer momentum AUS. Der Backtest validierte festes SL/TP OHNE
+    # Trailing. Die Live-Stufen verengen schon ab +1.5% Gewinn und bei +8% auf
+    # 3% Abstand — sie wuerden jeden Gewinner LANGE vor den 30% rauswerfen und
+    # damit etwas anderes handeln als gemessen wurde. 162 von 242 Trades im
+    # Backtest liefen bis ans Zeitlimit, nicht ins TP: genau das soll moeglich
+    # bleiben. Fuer gainer bleibt das Trailing an (dort ist schnell raus der Sinn).
+    MOMENTUM_TRAILING_ENABLED = os.getenv("MOMENTUM_TRAILING_ENABLED", "0") == "1"
 
     # Intervals
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 60))

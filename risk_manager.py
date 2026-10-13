@@ -140,6 +140,12 @@ class RiskManager:
         if symbol not in self.open_positions:
             return
         pos = self.open_positions[symbol]
+        # 10.10.2026: Trailing fuer momentum/sentiment abschaltbar. Siehe
+        # MOMENTUM_TRAILING_ENABLED in config.py — die Stufen verengen schon ab
+        # +1.5% und wuerden die im Backtest validierten weiten Laeufe (TP 30%)
+        # abschneiden. gainer behaelt sein Trailing.
+        if pos.get("strategy") != "gainer" and not Config.MOMENTUM_TRAILING_ENABLED:
+            return
         direction = pos.get("direction", "long")
         entry = pos["entry_price"]
 

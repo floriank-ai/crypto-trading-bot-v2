@@ -1421,7 +1421,7 @@ def run_bot():
                     continue
 
                 print(f"\n  Analyzing {symbol}...")
-                df = exchange.get_ohlcv(symbol, "15m", limit=100)
+                df = exchange.get_ohlcv(symbol, Config.STRATEGY_TIMEFRAME, limit=100)
                 if df.empty:
                     continue
 
