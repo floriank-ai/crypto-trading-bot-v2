@@ -41,7 +41,17 @@ class Config:
     # Boden: ein einzelner Round-Trip (~0.52% auf die Position, bei 200-400 EUR
     # Positionen ~0.1-0.2% des Portfolios) löst den Schutz nicht mehr aus, ein
     # echter Drawdown schon.
-    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", -0.25))
+    # 14.10.2026: -0.25% -> -6.0%. Die Baender waren fuer die ALTE Strategie
+    # kalibriert (4%-Stops, Minuten-Haltedauer, kleine Schwankungen). Die
+    # validierte Trendfolge hat 10%-Stops und haelt TAGE, mit unrealisierten
+    # Verlusten im Portfoliowert — mehrere Prozent Schwankung sind dort normal.
+    # LIVE BEOBACHTET: nach EINEM verlorenen Gainer-Trade (-2.92 EUR) stand der
+    # Bot bei 991.36 unter der Schwelle 997.50 und hat seine eigene LONG-Seite
+    # blockiert — also genau die Richtung, die der Backtest als profitabel
+    # ausgewiesen hat. Zwei Entry-Gebuehren von je ~2 EUR reichen fast allein.
+    # -6% liegt unter der Haelfte des rechnerischen Extremfalls (-12%, siehe
+    # Hard-Stop) und greift damit erst bei echtem Drawdown statt bei Rauschen.
+    CAPITAL_PROTECT_PCT = float(os.getenv("CAPITAL_PROTECT_PCT", -6.0))
     # 15.06.2026 — Zwei-Stufen-Schutz statt Hard-Freeze-Deadlock.
     # PROBLEM: Unter dem Boden machte der Bot sleep+continue → check_exits wurde
     # übersprungen → offene Positionen wurden NICHT mehr gemanagt (keine SL/TP)
@@ -49,7 +59,14 @@ class Config:
     # NEU: Soft-Zone (unter Boden, aber über Hard-Stop) = nur Shorts + Exits laufen
     # weiter → Bot kann sich rausarbeiten. Hard-Freeze ERST bei echtem Absturz
     # CAPITAL_HARD_STOP_PCT % unter dem Boden (Katastrophenschutz).
-    CAPITAL_HARD_STOP_PCT = float(os.getenv("CAPITAL_HARD_STOP_PCT", 5.0))
+    # 14.10.2026: 5% -> 18%. Der Circuit-Breaker schliesst ALLE Positionen.
+    # Rechnerischer Extremfall der neuen Konfiguration: 2 * 240 + 6 * 120 =
+    # 1200 EUR Notional, bei 10% Stop = -120 EUR = -12% des Kontos. Ein
+    # Breaker bei -5% haette also MITTEN in normaler Strategie-Varianz alles
+    # zwangsgeschlossen — genau die Positionen, die 7 Tage laufen sollen, und
+    # jedes Mal zum Preis von 1.20% Round-Trip. 18% liegt sicher jenseits des
+    # Extremfalls: er feuert nur noch bei einer echten Katastrophe.
+    CAPITAL_HARD_STOP_PCT = float(os.getenv("CAPITAL_HARD_STOP_PCT", 18.0))
     # 08.10.2026: Der Hard-Stop ist jetzt ein Circuit-Breaker statt eines Vollstopps
     # (siehe main.py). Nach dem Flat-Gehen pausieren neue Entries so lange — danach
     # handelt der Bot normal weiter. Verhindert das 78-Tage-Dauergrab vom 13.07.2026.
