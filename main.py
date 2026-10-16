@@ -1024,9 +1024,11 @@ def run_bot():
                     pos = risk_mgr.open_positions[sym]
                     if pos.get("direction") != "short":
                         continue
-                    # 09.10.2026: Ermessens-Exit -> Mindest-Haltedauer beachten.
-                    # Dieser Zweig kappte Gewinner auf der einzig profitablen
-                    # Seite; vor 12h ist der Lauf statistisch noch nicht da.
+                    # 16.10.2026: fuer momentum komplett aus — er deckelt bei +4%,
+                    # wo die validierte Strategie 30% anstrebt.
+                    if (pos.get("strategy") not in ("gainer", "dca", "grid")
+                            and not Config.MOMENTUM_MARKET_CONTEXT_EXIT):
+                        continue
                     if not risk_mgr.discretionary_exit_allowed(sym):
                         continue
                     ticker = exchange.get_ticker(sym)
@@ -1077,7 +1079,10 @@ def run_bot():
                         continue
                     if pos.get("strategy") in ("dca", "grid", "gainer"):
                         continue  # DCA/Grid/Gainer haben eigene Logik
-                    # 09.10.2026: Ermessens-Exit -> Mindest-Haltedauer beachten.
+                    # 16.10.2026: fuer momentum komplett aus, siehe bullish-Zweig.
+                    if (pos.get("strategy") not in ("gainer", "dca", "grid")
+                            and not Config.MOMENTUM_MARKET_CONTEXT_EXIT):
+                        continue
                     if not risk_mgr.discretionary_exit_allowed(sym):
                         continue
                     ticker = exchange.get_ticker(sym)
@@ -1192,6 +1197,8 @@ def run_bot():
                     print(f"  [GainerTimeout] {sym} {age_h:.1f}h offen, P&L {pnl_pct*100:+.2f}% "
                           f"(< erste TP-Stufe +{gainer_first_tp*100:.0f}%) → Pump vorbei, Close")
                 else:
+                    if not Config.MOMENTUM_TIME_STOP_ENABLED:
+                        continue  # 16.10.2026: nicht Teil der validierten Konfiguration
                     if not _ts_slot_pressure:
                         continue  # kein Slot-Druck → Halten ist gratis, Exit kostet
                     if not risk_mgr.discretionary_exit_allowed(sym):

@@ -449,6 +449,20 @@ class Config:
     # bleiben. Fuer gainer bleibt das Trailing an (dort ist schnell raus der Sinn).
     MOMENTUM_TRAILING_ENABLED = os.getenv("MOMENTUM_TRAILING_ENABLED", "0") == "1"
 
+    # 16.10.2026: Die validierte Konfiguration kennt GENAU DREI Exits fuer
+    # momentum: Stop-Loss, Take-Profit, 7-Tage-Limit. Live liefen zusaetzlich
+    # der Flatline-Time-Stop und der Marktkontext-Exit mit — mit dem Ergebnis,
+    # dass in 14 Ausstiegen NULL mal das Take-Profit erreicht wurde:
+    #   stop_loss 4x | time_stop_flatlined 5x (-8.52 EUR) | market_context 5x
+    # Der Time-Stop kappt nach 12h, was Tage braucht. Der Marktkontext-Exit
+    # schliesst bei +4%, wo die Strategie 30% anstrebt — er deckelt genau die
+    # grossen Laeufe, von denen der Edge lebt (im Backtest trugen 27 TP-Trades
+    # mit je +28.8% die 53 Verlierer). Dieselbe Fehlerklasse wie das Trailing,
+    # das ich beim Umbau schon abgeschaltet hatte, nur unvollstaendig.
+    # Beide fuer momentum AUS. gainer behaelt seine eigene schnelle Logik.
+    MOMENTUM_TIME_STOP_ENABLED = os.getenv("MOMENTUM_TIME_STOP_ENABLED", "0") == "1"
+    MOMENTUM_MARKET_CONTEXT_EXIT = os.getenv("MOMENTUM_MARKET_CONTEXT_EXIT", "0") == "1"
+
     # Intervals
     CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 60))
     NEWS_CHECK_INTERVAL = int(os.getenv("NEWS_CHECK_INTERVAL", 300))
