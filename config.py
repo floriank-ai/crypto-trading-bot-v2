@@ -138,8 +138,25 @@ class Config:
     # API ablesbar — und es sind keine echten Kraken-Keys hinterlegt.
     # Wer einen besseren Tier hat, setzt ihn per Env (z.B. Tier 3):
     #   railway variables --set TAKER_FEE_PCT=0.0038 --set MAKER_FEE_PCT=0.0022
-    TAKER_FEE_PCT = float(os.getenv("TAKER_FEE_PCT", 0.0080))
-    MAKER_FEE_PCT = float(os.getenv("MAKER_FEE_PCT", 0.0040))
+    # 16.10.2026: von Kraken-Saetzen (0.80/0.40) auf ein realistisch
+    # erreichbares MiCA-Niveau umgestellt, um im Papier-Modus zu messen, was die
+    # Strategie auf einer guenstigeren Boerse leisten wuerde.
+    # ANLASS: Binance ist fuer spanische Nutzer KEINE Option mehr — die
+    # MiCA-Bewerbung wurde im Juni 2026 zurueckgezogen, seit 01.07.2026 kein
+    # Spot-/Margin-Handel fuer EU-Nutzer, die CNMV hat "keine Ausnahmen"
+    # erklaert. Die 0.10%-Rechnung ist damit hinfaellig.
+    # Gesetzt sind die Bitvavo-Basissaetze (0.25 taker / 0.15 maker): EU-nativ,
+    # MiCA-Lizenz der niederlaendischen AFM seit Juni 2025, EUR-Konten.
+    # Bewusst die KONSERVATIVE Wahl — OKX waere mit kolportierten 0.10/0.08
+    # nochmal gut doppelt so guenstig, aber diese Zahl ist nur aus
+    # Review-Quellen, nicht von OKX selbst bestaetigt (deren Seite ist
+    # JS-gerendert und gab nichts her). Traegt die Strategie bei 0.40%
+    # Round-Trip, traegt sie bei 0.18% erst recht.
+    # Zum Vergleich auf die 1402 echten Round-Trips (Brutto +298.32 EUR):
+    #   Kraken 1.20% RT -> -654 EUR | Bitvavo 0.40% -> -19 EUR
+    #   OKX    0.18% RT -> +155 EUR | Binance 0.20% -> +140 EUR (nicht verfuegbar)
+    TAKER_FEE_PCT = float(os.getenv("TAKER_FEE_PCT", 0.0025))
+    MAKER_FEE_PCT = float(os.getenv("MAKER_FEE_PCT", 0.0015))
     # Limit-Orders (maker) nur für PREISZIEL-Exits: take_profit und partial_tp.
     # Die kennen ihr Ziel im Voraus und können im Orderbuch liegen. Stop-Loss,
     # Time-Stop, Rotation, HWM und alle Entries bleiben Market (taker) — die
