@@ -285,7 +285,18 @@ class Config:
     # Mit 120 EUR: 8 * 120 * 10% = -96 EUR = ~-10%. Bewusst die Groesse gesenkt
     # und nicht die Slot-Zahl, damit die Trade-Frequenz erhalten bleibt.
     POSITION_SIZE_NORMAL_EUR = float(os.getenv("POSITION_SIZE_NORMAL_EUR", 120))
-    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 240))
+    # 19.10.2026: STRONG-Tier auf NORMAL-Niveau (240 -> 120). Der validierte
+    # Backtest nutzte DURCHGEHEND gleiche Positionsgroessen (POSITION_SIZE_PCT
+    # = 0.20, ein einziger Wert) — der 2x-Tier ist ein Ueberrest der alten
+    # Scalping-Konfiguration und war nie Teil der gemessenen Strategie.
+    # Mit dem auf 10% verbreiterten Stop bedeutet er 2.5% Kontorisiko pro Trade
+    # statt 1.2%: doppelte Varianz ohne belegten Zusatzertrag.
+    # LIVE GESEHEN: AAVE/EUR lief als STRONG (240 EUR) und verlor beim Stop
+    # -25.61 EUR, waehrend DOT/EUR (120 EUR) im selben Moment -12.87 EUR
+    # verlor. Gleiches Setup, gleicher Stop, doppelter Schaden.
+    # Dieselbe Fehlerklasse wie Trailing/Time-Stop/Marktkontext: ein Mechanismus
+    # aus der alten Konfiguration, der in der neuen nichts verloren hat.
+    POSITION_SIZE_STRONG_EUR = float(os.getenv("POSITION_SIZE_STRONG_EUR", 120))
     # Hard-Reserve fuer Gainer-Strategie (2 Slots * 100 EUR = 200) + 50 EUR Puffer.
     # Wenn Cash darunter → nur Min-Sizing (50 EUR), damit Gainer immer schlagen kann.
     MIN_CASH_RESERVE_EUR = float(os.getenv("MIN_CASH_RESERVE_EUR", 250))
